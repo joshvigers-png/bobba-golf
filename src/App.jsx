@@ -217,35 +217,44 @@ const css = `
   .scroll-area{flex:1;overflow-y:auto;padding-bottom:88px;}
 
   /* ── Bottom nav ── */
-  .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:${C.black};display:flex;z-index:100;padding:8px 6px;padding-bottom:calc(10px + env(safe-area-inset-bottom));gap:2px;}
-  .nav-btn{flex:1;padding:8px 2px;border:none;background:none;color:#6b6b6b;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-size:10px;font-family:'Inter',sans-serif;font-weight:700;transition:color .15s, background .15s;letter-spacing:.02em;border-radius:12px;}
-  .nav-btn.active{color:${C.white};background:rgba(255,255,255,.08);}
+  .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:${C.white};border-top:1px solid ${C.line};display:flex;z-index:100;padding:8px 6px;padding-bottom:calc(10px + env(safe-area-inset-bottom));gap:2px;}
+  .nav-btn{flex:1;padding:8px 2px;border:none;background:none;color:${C.ash};display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-size:10px;font-family:'Inter',sans-serif;font-weight:700;transition:color .15s, background .15s;letter-spacing:.02em;border-radius:12px;}
+  .nav-btn.active{color:${C.white};background:${C.black};}
   .nav-btn svg{width:21px;height:21px;}
 
   /* ── Page header ── */
-  .page-head{background:${C.black};padding:56px 22px 32px;position:relative;overflow:hidden;}
+  .page-head{background:${C.black};padding:56px 24px 32px;position:relative;overflow:hidden;}
   .page-head::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle, rgba(255,255,255,.06) 1px, transparent 1px);background-size:16px 16px;mask-image:radial-gradient(ellipse 70% 100% at 100% 0%, black, transparent);pointer-events:none;}
   .page-head-eyebrow{font-size:10.5px;color:rgba(255,255,255,.4);letter-spacing:.2em;text-transform:uppercase;font-weight:700;margin-bottom:9px;position:relative;z-index:1;}
   .page-head h1{font-family:'Inter',sans-serif;color:${C.white};font-size:32px;font-weight:900;letter-spacing:-0.03em;line-height:1.02;position:relative;z-index:1;}
   .page-head p{color:rgba(255,255,255,.5);font-size:13px;margin-top:7px;position:relative;z-index:1;}
+
+  /* ── Home screen header — white variant, lighter than the black page-head
+     used elsewhere in the app (Play a Round, The Bag, etc.) ── */
+  .home-head{background:${C.white};padding:20px 24px 28px;position:relative;overflow:hidden;}
+  .home-head::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle, rgba(10,10,10,.06) 1px, transparent 1px);background-size:16px 16px;mask-image:radial-gradient(ellipse 70% 100% at 100% 0%, black, transparent);pointer-events:none;}
+  .home-head-eyebrow{font-size:10.5px;color:${C.steel};letter-spacing:.2em;text-transform:uppercase;font-weight:700;margin-bottom:9px;position:relative;z-index:1;}
+  .home-head h1{font-family:'Inter',sans-serif;color:${C.black};font-size:32px;font-weight:900;letter-spacing:-0.03em;line-height:1.02;position:relative;z-index:1;margin:0;}
+  .home-section-title{font-size:11px;color:${C.steel};font-weight:700;text-transform:uppercase;letter-spacing:.16em;}
 
   /* ── Cards / tiles ── */
   .panel{background:${C.white};border:1px solid ${C.line};padding:20px;margin:0 18px 14px;box-shadow:0 1px 3px rgba(10,10,10,.04);}
   .panel-dark{background:${C.black};color:${C.white};border:1px solid ${C.lineDark};box-shadow:0 8px 24px rgba(10,10,10,.18);}
 
   /* Module tile grid on home */
-  .tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 18px 28px;}
-  .tile{background:${C.white};border:1px solid ${C.line};padding:22px 18px;display:flex;flex-direction:column;justify-content:space-between;min-height:140px;cursor:pointer;transition:border-color .15s, transform .1s, box-shadow .15s;position:relative;overflow:hidden;border-radius:2px;box-shadow:0 1px 2px rgba(10,10,10,.03);}
+  .tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:0 20px 32px;}
+  .tile{background:${C.white};border:1px solid ${C.line};padding:24px 20px;display:flex;flex-direction:column;justify-content:space-between;min-height:152px;cursor:pointer;transition:border-color .15s, transform .1s, box-shadow .15s;position:relative;overflow:hidden;border-radius:3px;box-shadow:0 2px 8px rgba(10,10,10,.04);}
   .tile:active{transform:scale(.97);border-color:${C.black};}
   .tile-disabled{cursor:default;background:${C.cloud};}
-  .tile-icon-wrap{width:42px;height:42px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;background:${C.black};border-radius:50%;}
-  .tile-disabled .tile-icon-wrap{background:${C.mist};}
-  .tile-icon{width:19px;height:19px;color:${C.white};}
+  .tile-icon-wrap{width:44px;height:44px;margin-bottom:18px;display:flex;align-items:center;justify-content:center;background:${C.white};border:1.5px solid ${C.black};border-radius:50%;position:relative;}
+  .tile-icon-wrap::after{display:none;}
+  .tile-disabled .tile-icon-wrap{background:${C.cloud};border-color:${C.mist};}
+  .tile-icon{width:19px;height:19px;color:${C.black};}
   .tile-disabled .tile-icon{color:${C.ash};}
-  .tile-label{font-family:'Inter',sans-serif;font-weight:800;font-size:15px;letter-spacing:-0.02em;color:${C.black};line-height:1.15;}
-  .tile-sub{font-size:11px;color:${C.steel};margin-top:3px;font-weight:500;}
+  .tile-label{font-family:'Inter',sans-serif;font-weight:800;font-size:15px;letter-spacing:-0.02em;color:${C.black};line-height:1.2;}
+  .tile-sub{font-size:11px;color:${C.steel};margin-top:4px;font-weight:500;letter-spacing:-0.01em;}
   .tile-disabled .tile-label,.tile-disabled .tile-sub{color:${C.ash};}
-  .tile-arrow{position:absolute;top:18px;right:18px;width:15px;height:15px;color:${C.fog};}
+  .tile-arrow{position:absolute;top:20px;right:20px;width:14px;height:14px;color:${C.fog};}
   .tile-soon{position:absolute;top:16px;right:16px;font-size:8px;font-weight:800;letter-spacing:.1em;color:${C.steel};background:${C.mist};padding:4px 7px;text-transform:uppercase;border-radius:20px;}
 
   /* ── Buttons ── */
@@ -271,14 +280,14 @@ const css = `
   .seg-btn:not(:last-child){border-right:1.5px solid ${C.black};}
 
   /* ── Stat blocks ── */
-  .stat-row{display:grid;grid-template-columns:repeat(4,1fr);margin:-26px 18px 28px;background:${C.white};box-shadow:0 12px 28px rgba(0,0,0,.16);position:relative;z-index:2;border-radius:2px;}
-  .stat-cell{padding:18px 4px 16px;text-align:center;position:relative;}
-  .stat-cell:not(:last-child)::after{content:'';position:absolute;right:0;top:18%;bottom:18%;width:1px;background:${C.line};}
-  .stat-val{font-family:'Inter',sans-serif;font-size:24px;font-weight:900;letter-spacing:-0.02em;color:${C.black};line-height:1;}
-  .stat-lbl{font-size:8.8px;color:${C.steel};font-weight:700;text-transform:uppercase;letter-spacing:.09em;margin-top:6px;}
+  .stat-row{display:grid;grid-template-columns:repeat(4,1fr);margin:0 20px 32px;background:${C.white};border:1px solid ${C.line};box-shadow:0 2px 10px rgba(10,10,10,.05);position:relative;z-index:2;border-radius:3px;}
+  .stat-cell{padding:22px 6px 19px;text-align:center;position:relative;}
+  .stat-cell:not(:last-child)::after{content:'';position:absolute;right:0;top:22%;bottom:22%;width:1px;background:${C.line};}
+  .stat-val{font-family:'Inter',sans-serif;font-size:25px;font-weight:900;letter-spacing:-0.02em;color:${C.black};line-height:1;}
+  .stat-lbl{font-size:8.8px;color:${C.steel};font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-top:7px;}
 
   /* ── Section header ── */
-  .section-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 18px;margin-bottom:14px;}
+  .section-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 20px;margin-bottom:16px;}
   .section-title{font-family:'Inter',sans-serif;font-size:16px;font-weight:800;color:${C.black};letter-spacing:-0.02em;}
   .section-link{font-size:10.5px;font-weight:700;color:${C.steel};text-transform:uppercase;letter-spacing:.06em;cursor:pointer;}
 
@@ -913,22 +922,22 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
 
   return (
     <div>
-      {/* Header */}
-      <div className="page-head" style={{ paddingBottom: 50, paddingTop: 14 }}>
+      {/* Header — white, matching the splash/login screen's lighter character */}
+      <div className="home-head">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
           <div>
-            <div className="page-head-eyebrow">{greeting}</div>
+            <div className="home-head-eyebrow">{greeting}</div>
             <h1>{firstName}</h1>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button style={{ background: "rgba(255,255,255,.1)", border: "none", width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.white, cursor: "pointer" }}>
+            <button style={{ background: C.white, border: `1.5px solid ${C.line}`, width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.black, cursor: "pointer" }}>
               <div style={{ width: 18, height: 18 }}><Icon.Bell /></div>
             </button>
             <button onClick={onOpenProfile} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", borderRadius: "50%" }}>
               {user.photo ? (
-                <img src={user.photo} alt="" style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${C.white}`, display: "block" }} />
+                <img src={user.photo} alt="" style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${C.line}`, display: "block" }} />
               ) : (
-                <div className="avatar" style={{ width: 40, height: 40, fontSize: 13.5, border: `1.5px solid ${C.white}` }}>{initials}</div>
+                <div className="avatar" style={{ width: 40, height: 40, fontSize: 13.5, border: `1.5px solid ${C.line}` }}>{initials}</div>
               )}
             </button>
           </div>
@@ -957,7 +966,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
 
       {/* Module grid */}
       <div className="section-head">
-        <span className="section-title">The Club</span>
+        <span className="home-section-title">The Club</span>
       </div>
       <div className="tile-grid">
         {modules.map(m => (
