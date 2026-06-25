@@ -181,7 +181,7 @@ const css = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  html,body,#root{height:100%;background:${C.black};}
+  html,body,#root{height:100%;background:${C.black};touch-action:manipulation;}
   body{font-family:'Inter',sans-serif;color:${C.black};-webkit-font-smoothing:antialiased;letter-spacing:-0.014em;}
 
   .mono{font-family:'JetBrains Mono',monospace;}
@@ -270,7 +270,7 @@ const css = `
   /* ── Form ── */
   .field{margin-bottom:18px;}
   .field-label{font-size:10.5px;font-weight:700;color:${C.steel};text-transform:uppercase;letter-spacing:.12em;margin-bottom:9px;display:block;}
-  .input{width:100%;padding:14px 15px;border:1.5px solid ${C.line};border-radius:1px;font-size:15px;font-family:'Inter',sans-serif;background:${C.paper};color:${C.black};outline:none;transition:border-color .18s, background .18s, box-shadow .18s;}
+  .input{width:100%;padding:14px 15px;border:1.5px solid ${C.line};border-radius:1px;font-size:16px;font-family:'Inter',sans-serif;background:${C.paper};color:${C.black};outline:none;transition:border-color .18s, background .18s, box-shadow .18s;}
   .input:focus{border-color:${C.black};background:${C.white};box-shadow:0 2px 12px rgba(10,10,10,.07);}
   .input::placeholder{color:${C.ash};}
 
@@ -489,7 +489,7 @@ const css = `
   .request-btn.decline{background:${C.white};color:${C.steel};border-color:${C.line};}
 
   /* ── Composer textarea ── */
-  .composer{width:100%;border:1.5px solid ${C.line};border-radius:1px;padding:14px 15px;font-size:14px;font-family:'Inter',sans-serif;background:${C.paper};resize:none;outline:none;min-height:90px;}
+  .composer{width:100%;border:1.5px solid ${C.line};border-radius:1px;padding:14px 15px;font-size:16px;font-family:'Inter',sans-serif;background:${C.paper};resize:none;outline:none;min-height:90px;}
   .composer:focus{border-color:${C.black};background:${C.white};}
 
   /* ── History screen ── */
