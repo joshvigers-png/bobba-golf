@@ -1264,7 +1264,12 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     try {
       const res = await fetch(`${COURSE_API_PROXY}/course/${c.id}`);
       if (!res.ok) throw new Error(`Course detail failed (${res.status})`);
-      const raw = await res.json();
+      const data = await res.json();
+      // The detail endpoint wraps the course in a "courses" array, same as
+      // search (e.g. {"courses":[{...}]}), rather than returning the course
+      // object directly at the top level.
+      const raw = Array.isArray(data.courses) ? data.courses[0] : data;
+      if (!raw) throw new Error("No course data returned");
       setCourse(normalizeApiCourse(raw));
       setStep("setup");
     } catch (e) {
