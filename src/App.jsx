@@ -37,6 +37,43 @@ const LS = {
 // real-world limits of "duplicate" checking without a shared backend.
 const USERNAME_FORMAT = /^[a-zA-Z][a-zA-Z0-9_]{2,19}$/;
 
+// ─── Security question (password reset identity check) ──────────────────────
+// With no email-sending backend, this is the only practical way to confirm
+// "you are who you say you are" when resetting a password from a device that
+// isn't already signed into the account. Not bulletproof, but far better
+// than "type someone's email and reset their password" with zero checks.
+const SECURITY_QUESTIONS = [
+  "What was the name of your first golf club (course)?",
+  "What is your favourite golf course you've played?",
+  "What was your childhood nickname?",
+  "What is the name of your first pet?",
+];
+function normalizeAnswer(s) {
+  return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// ─── Device trust for password reset ─────────────────────────────────────────
+// bb_user only ever holds the CURRENT session — once a login attempt fails
+// (e.g. the real bug we hit: a forgotten/mismatched password), there's no
+// active session left to check, so bb_user alone can't tell us "this is
+// genuinely your device." This separate, append-only record persists across
+// failed logins and signouts-of-other-accounts, so the reset screen can still
+// recognise a returning device. It's cleared only when that specific account
+// explicitly signs out, matching the security intent: signing out means
+// "stop trusting this device for this account."
+function markDeviceTrusted(userId) {
+  const known = LS.get("bb_known_accounts") || [];
+  if (!known.includes(userId)) LS.set("bb_known_accounts", [...known, userId]);
+}
+function isDeviceTrustedFor(userId) {
+  const known = LS.get("bb_known_accounts") || [];
+  return known.includes(userId);
+}
+function clearDeviceTrust(userId) {
+  const known = LS.get("bb_known_accounts") || [];
+  LS.set("bb_known_accounts", known.filter(id => id !== userId));
+}
+
 // A working blocklist of slurs, profanity, and common offensive terms. This
 // is intentionally not exhaustive — no client-side wordlist ever fully is —
 // but covers common cases plus simple leetspeak substitutions people use to
@@ -739,51 +776,17 @@ function SetUsernameScreen({ user, onSaved }) {
   );
 }
 
-// ─── TEMPORARY diagnostic screen — read-only view of stored accounts, used to
-// debug a real login issue. Safe to remove once resolved; makes no changes. ──
-function DebugAccountsScreen({ onBack }) {
-  const acc = LS.get("bb_accounts") || [];
-  const mask = (pw) => pw ? `${pw[0]}${"•".repeat(Math.max(0, pw.length - 2))}${pw[pw.length-1]}` : "(empty)";
-
-  return (
-    <div className="auth-wrap">
-      <div className="auth-card" style={{ maxHeight: "80vh", overflowY: "auto" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 16, padding: 0, fontWeight: 700 }}>
-          ← Back to Sign In
-        </button>
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Stored Accounts (Debug)</div>
-        <p style={{ fontSize: 11.5, color: C.steel, marginBottom: 18, lineHeight: 1.6 }}>
-          Read-only — nothing here changes your data. {acc.length} account{acc.length!==1?"s":""} found in this browser.
-        </p>
-        {acc.length === 0 && (
-          <p style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>No accounts found in this browser's storage at all.</p>
-        )}
-        {acc.map(a => (
-          <div key={a.id} style={{ border: `1px solid ${C.line}`, padding: 14, marginBottom: 10, borderRadius: 2 }}>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>{a.name}</div>
-            <div style={{ fontSize: 12, color: C.steel, marginTop: 4, fontFamily: "monospace" }}>
-              email: "{a.email}"<br/>
-              email length: {a.email?.length ?? 0}<br/>
-              password (masked): {mask(a.password)}<br/>
-              password length: {a.password?.length ?? 0}<br/>
-              username: {a.username || "(none set)"}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // ─── Password reset ────────────────────────────────────────────────────────────
 // No backend/email here, so this works by confirming the account's email
 // directly in-app, then letting the person set a new password immediately —
 // safe because they're already the one holding this browser/device.
-function ResetPasswordScreen({ onBack, onReset }) {
-  const [step, setStep] = useState("email"); // email | newpassword | done
+function ResetPasswordScreen({ onBack, onReset, deviceIsTrustedFor }) {
+  const [step, setStep] = useState("email"); // email | verify | newpassword | done
   const [email, setEmail] = useState("");
   const [account, setAccount] = useState(null);
   const [error, setError] = useState("");
+  const [answer, setAnswer] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -793,8 +796,39 @@ function ResetPasswordScreen({ onBack, onReset }) {
     if (!cleaned) { setError("Enter the email address on your account."); return; }
     const acc = LS.get("bb_accounts") || [];
     const found = acc.find(a => a.email?.trim().toLowerCase() === cleaned);
-    if (!found) { setError("No account found with that email address."); return; }
+    if (!found) {
+      // Deliberately the same generic message a successful match would lead
+      // toward failing on — don't reveal whether an email exists at all.
+      setError("If that's not right, double-check the email and try again.");
+      setAccount(null);
+      return;
+    }
     setAccount(found);
+    // If this exact account is the one already signed in on this device,
+    // there's no real security benefit to a security question — you're
+    // already proven to be the account owner by having an active session
+    // here. Skip straight to setting a new password.
+    if (deviceIsTrustedFor(found.id)) {
+      setStep("newpassword");
+      return;
+    }
+    // Otherwise (a different device/browser, or no one signed in here),
+    // require the security question before allowing a reset — this is what
+    // stops someone who only knows your email from taking over your account.
+    if (!found.securityQuestion) {
+      setError("This account doesn't have a security question set up (it predates that feature). Password reset from a different device isn't available for it yet — try resetting from the device you're normally signed in on, or contact whoever manages the club.");
+      setAccount(null);
+      return;
+    }
+    setStep("verify");
+  };
+
+  const verifyAnswer = () => {
+    setError("");
+    if (normalizeAnswer(answer) !== account.securityAnswer) {
+      setError("That doesn't match. If you've genuinely forgotten it, this in-app reset can't help further without an email service connected — contact whoever manages the club for now.");
+      return;
+    }
     setStep("newpassword");
   };
 
@@ -822,7 +856,7 @@ function ResetPasswordScreen({ onBack, onReset }) {
           <>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Reset Your Password</div>
             <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-              Enter the email address on your account. Since there's no email service connected yet, you'll set a new password directly here rather than via a reset link.
+              Enter the email address on your account to get started.
             </p>
             <div className="field" style={{ marginBottom: 22 }}>
               <label className="field-label">Email</label>
@@ -834,6 +868,25 @@ function ResetPasswordScreen({ onBack, onReset }) {
               </div>
             )}
             <button className="btn btn-primary" onClick={findAccount}>Continue</button>
+          </>
+        )}
+
+        {step === "verify" && (
+          <>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Confirm It's You</div>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+              You're resetting this from a device that isn't currently signed into this account, so answer the security question set up at signup to confirm it's really you.
+            </p>
+            <div className="field">
+              <label className="field-label">{account.securityQuestion}</label>
+              <input className="input" placeholder="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} onKeyDown={e => e.key === "Enter" && verifyAnswer()} />
+            </div>
+            {error && (
+              <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginTop: 18, marginBottom: 4, fontSize: 12.5, color: C.black, fontWeight: 500, lineHeight: 1.5 }}>
+                {error}
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={verifyAnswer} style={{ marginTop: 22 }}>Continue</button>
           </>
         )}
 
@@ -877,9 +930,9 @@ function ResetPasswordScreen({ onBack, onReset }) {
   );
 }
 
-function AuthScreen({ onAuth, onShowDebug, onShowReset }) {
+function AuthScreen({ onAuth, onShowReset }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", handicap: "" });
+  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", handicap: "", securityQuestion: SECURITY_QUESTIONS[0], securityAnswer: "" });
   const [error, setError] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "checking" | "ok" | "error"
   const [usernameError, setUsernameError] = useState("");
@@ -913,12 +966,14 @@ function AuthScreen({ onAuth, onShowDebug, onShowReset }) {
     const acc = LS.get("bb_accounts") || [];
     if (mode === "signup") {
       if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
+      if (!form.securityAnswer.trim()) { setError("Please answer the security question — it's used to verify it's really you if you ever need to reset your password on a different device."); return; }
       if (acc.find(a => a.email?.trim().toLowerCase() === email)) { setError("An account with this email already exists."); return; }
       const usernameErr = validateUsername(form.username, acc);
       if (usernameErr) { setError(usernameErr); return; }
       const u = {
         id: Date.now(), name: form.name, username: form.username, email, password,
         handicap: form.handicap ? parseFloat(form.handicap) : null,
+        securityQuestion: form.securityQuestion, securityAnswer: normalizeAnswer(form.securityAnswer),
         handicapHistory: [], bag: [], joined: Date.now(), friends: [], friendRequests: [],
       };
       LS.set("bb_accounts", [...acc, u]);
@@ -1009,6 +1064,28 @@ function AuthScreen({ onAuth, onShowDebug, onShowReset }) {
             <input className="input" type="number" placeholder="e.g. 14.2" min="0" max="54" step="0.1" value={form.handicap} onChange={e => setForm({ ...form, handicap: e.target.value })} />
           </div>
         )}
+        {mode === "signup" && (
+          <>
+            <div className="field">
+              <label className="field-label">Security Question</label>
+              <select
+                className="input"
+                value={form.securityQuestion}
+                onChange={e => setForm({ ...form, securityQuestion: e.target.value })}
+                style={{ appearance: "none" }}
+              >
+                {SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 30 }}>
+              <label className="field-label">Your Answer</label>
+              <input className="input" placeholder="Your answer" value={form.securityAnswer} onChange={e => setForm({ ...form, securityAnswer: e.target.value })} />
+              <p style={{ fontSize: 10.5, color: C.steel, marginTop: 6, lineHeight: 1.5 }}>
+                Used to verify it's really you if you reset your password from a different device. Remember exactly what you type.
+              </p>
+            </div>
+          </>
+        )}
 
         {error && (
           <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginBottom: 20, fontSize: 12.5, color: C.black, fontWeight: 500 }}>
@@ -1030,9 +1107,6 @@ function AuthScreen({ onAuth, onShowDebug, onShowReset }) {
       <p style={{ color: C.ash, fontSize: 10, marginTop: 30, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 600, position: "relative", zIndex: 1, animation: "fadeUp .6s cubic-bezier(.16,1,.3,1) .4s both", opacity: 0 }}>
         Est. for the modern golfer
       </p>
-      <button onClick={onShowDebug} style={{ background: "none", border: "none", color: C.fog, fontSize: 10, marginTop: 14, cursor: "pointer", textDecoration: "underline" }}>
-        Trouble signing in?
-      </button>
     </div>
   );
 }
@@ -1044,7 +1118,6 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [modulePage, setModulePage] = useState(null); // which module detail screen, if any
   const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited
-  const [showDebug, setShowDebug] = useState(false); // TEMPORARY — read-only accounts debug screen
   const [showReset, setShowReset] = useState(false); // password reset flow
 
   useEffect(() => {
@@ -1093,9 +1166,8 @@ export default function App() {
 
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => setSplash(false)} /></>;
   if (!user) {
-    if (showDebug) return <><style>{css}</style><DebugAccountsScreen onBack={() => setShowDebug(false)} /></>;
-    if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} /></>;
-    return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); setUser(u); }} onShowDebug={() => setShowDebug(true)} onShowReset={() => setShowReset(true)} /></>;
+    if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} deviceIsTrustedFor={isDeviceTrustedFor} /></>;
+    return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); markDeviceTrusted(u.id); setUser(u); }} onShowReset={() => setShowReset(true)} /></>;
   }
 
   // Accounts created before usernames existed have no username at all —
@@ -1205,18 +1277,18 @@ export default function App() {
             <HomeScreen
               user={user}
               onOpenModule={setModulePage}
-              onLogout={() => { LS.del("bb_user"); setUser(null); }}
+              onLogout={() => { LS.del("bb_user"); clearDeviceTrust(user.id); setUser(null); }}
               onReviewRound={setReviewRound}
               onOpenProfile={() => setTab("profile")}
             />
           )}
-          {tab === "profile" && <ProfileScreen user={user} onUpdate={updateUser} onLogout={() => { LS.del("bb_user"); setUser(null); }} onDeleteAccount={deleteAccount} />}
+          {tab === "profile" && <ProfileScreen user={user} onUpdate={updateUser} onLogout={() => { LS.del("bb_user"); clearDeviceTrust(user.id); setUser(null); }} onDeleteAccount={deleteAccount} />}
         </div>
         <nav className="bottom-nav">
           {[
             { id: "home", label: "Home", icon: <Icon.Home />, action: () => setTab("home") },
             { id: "profile", label: "Profile", icon: <Icon.Profile />, action: () => setTab("profile") },
-            { id: "logout", label: "Sign Out", icon: <Icon.Logout />, action: () => { LS.del("bb_user"); setUser(null); } },
+            { id: "logout", label: "Sign Out", icon: <Icon.Logout />, action: () => { LS.del("bb_user"); clearDeviceTrust(user.id); setUser(null); } },
           ].map(n => (
             <button key={n.id} className={`nav-btn ${tab === n.id ? "active" : ""}`} onClick={n.action}>
               {n.icon}<span>{n.label}</span>
@@ -1320,7 +1392,10 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
 // ─── Profile Screen (baseline) ────────────────────────────────────────────────
 function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: user.name, username: user.username || "", handicap: user.handicap != null ? String(user.handicap) : "" });
+  const [form, setForm] = useState({
+    name: user.name, username: user.username || "", handicap: user.handicap != null ? String(user.handicap) : "",
+    securityQuestion: user.securityQuestion || SECURITY_QUESTIONS[0], securityAnswer: "",
+  });
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -1346,7 +1421,15 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
       const err = validateUsername(form.username, acc, user.id);
       if (err) { setUsernameStatus("error"); setUsernameError(err); return; }
     }
-    onUpdate({ ...user, name: form.name, username: form.username, handicap: form.handicap ? parseFloat(form.handicap) : null });
+    // Only overwrite the stored security answer if a new one was actually
+    // typed — leaves the existing answer untouched if the field was left
+    // blank (so editing your name doesn't accidentally wipe your security
+    // answer just because this field defaults empty for privacy).
+    const securityAnswer = form.securityAnswer.trim() ? normalizeAnswer(form.securityAnswer) : user.securityAnswer;
+    onUpdate({
+      ...user, name: form.name, username: form.username, handicap: form.handicap ? parseFloat(form.handicap) : null,
+      securityQuestion: form.securityQuestion, securityAnswer,
+    });
     setEditing(false);
   };
 
@@ -1412,6 +1495,19 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
             <div className="field" style={{ marginBottom: 22 }}>
               <label className="field-label">Handicap Index</label>
               <input className="input" type="number" step="0.1" min="0" max="54" value={form.handicap} onChange={e => setForm({ ...form, handicap: e.target.value })} />
+            </div>
+            <div className="field">
+              <label className="field-label">Security Question</label>
+              <select className="input" value={form.securityQuestion} onChange={e => setForm({ ...form, securityQuestion: e.target.value })} style={{ appearance: "none" }}>
+                {SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 22 }}>
+              <label className="field-label">Your Answer {user.securityAnswer && <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>(already set — leave blank to keep it)</span>}</label>
+              <input className="input" placeholder={user.securityAnswer ? "••••••••" : "Your answer"} value={form.securityAnswer} onChange={e => setForm({ ...form, securityAnswer: e.target.value })} />
+              <p style={{ fontSize: 10.5, color: C.steel, marginTop: 6, lineHeight: 1.5 }}>
+                Used to verify it's you if you ever reset your password from a different device.
+              </p>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-primary" onClick={save} style={{ flex: 1 }}>Save</button>
