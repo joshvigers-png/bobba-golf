@@ -1170,6 +1170,26 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const [searchError, setSearchError] = useState("");
   const [loadingCourse, setLoadingCourse] = useState(false);
 
+  // GolfCourseAPI splits "club" (the venue, e.g. "Bromsgrove Golf Centre")
+  // from "course" (a specific layout at that venue, e.g. "Course No. 1").
+  // For most UK clubs with a single course, course_name ends up being a
+  // short, not-very-useful label (sometimes just the town name) — so we
+  // show club_name as the real identifiable name, and only append the
+  // course name when it's clearly a distinct, specific course (i.e. the
+  // venue has multiple courses), not just a repeat or a generic stub.
+  const buildCourseName = (c) => {
+    // GolfCourseAPI sometimes appends an internal disambiguation ID in
+    // parentheses to club_name for venues with duplicate names, e.g.
+    // "Bromsgrove Golf Centre (...002727)" — strip that, but leave genuine
+    // descriptive parentheticals like "(Hoylake)" or "(North)" untouched.
+    const stripInternalId = (s) => s.replace(/\s*\([^)]*\d{4,}[^)]*\)\s*$/, "").trim();
+    const club = stripInternalId((c.club_name || "").trim());
+    const course = stripInternalId((c.course_name || "").trim());
+    if (!club) return course || "Unknown Course";
+    if (!course || course === club || club.toLowerCase().includes(course.toLowerCase())) return club;
+    return `${club} — ${course}`;
+  };
+
   // Debounced live search against the course API proxy. Falls back to the
   // built-in demo courses (COURSE_DB) if the proxy isn't reachable, so the
   // app never goes completely blank if the network/proxy is down.
@@ -1184,7 +1204,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         const data = await res.json();
         const mapped = (data.courses || []).map(c => ({
           id: c.id,
-          name: c.course_name || c.club_name,
+          name: buildCourseName(c),
           location: [c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(", "),
           lat: c.location?.latitude ?? null,
           lon: c.location?.longitude ?? null,
@@ -1231,7 +1251,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       return { n, par: sample?.par ?? 4, si: sample?.handicap ?? n, yds };
     });
     return {
-      id: raw.id, name: raw.course_name || raw.club_name,
+      id: raw.id, name: buildCourseName(raw),
       location: [raw.location?.city, raw.location?.state, raw.location?.country].filter(Boolean).join(", "),
       lat: raw.location?.latitude ?? null, lon: raw.location?.longitude ?? null,
       tees, holes,
