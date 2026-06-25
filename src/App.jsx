@@ -775,7 +775,109 @@ function DebugAccountsScreen({ onBack }) {
   );
 }
 
-function AuthScreen({ onAuth, onShowDebug }) {
+// ─── Password reset ────────────────────────────────────────────────────────────
+// No backend/email here, so this works by confirming the account's email
+// directly in-app, then letting the person set a new password immediately —
+// safe because they're already the one holding this browser/device.
+function ResetPasswordScreen({ onBack, onReset }) {
+  const [step, setStep] = useState("email"); // email | newpassword | done
+  const [email, setEmail] = useState("");
+  const [account, setAccount] = useState(null);
+  const [error, setError] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const findAccount = () => {
+    setError("");
+    const cleaned = email.trim().toLowerCase();
+    if (!cleaned) { setError("Enter the email address on your account."); return; }
+    const acc = LS.get("bb_accounts") || [];
+    const found = acc.find(a => a.email?.trim().toLowerCase() === cleaned);
+    if (!found) { setError("No account found with that email address."); return; }
+    setAccount(found);
+    setStep("newpassword");
+  };
+
+  const submitNewPassword = () => {
+    setError("");
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords don't match."); return; }
+    const acc = LS.get("bb_accounts") || [];
+    const updated = acc.map(a => a.id === account.id ? { ...a, password: newPassword } : a);
+    LS.set("bb_accounts", updated);
+    setStep("done");
+  };
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-logo-mark">
+        <img src={LOGO_BLACK} alt="BOBBA GOLF" style={{ width: 110 }} />
+      </div>
+      <div className="auth-card">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 16, padding: 0, fontWeight: 700 }}>
+          ← Back to Sign In
+        </button>
+
+        {step === "email" && (
+          <>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Reset Your Password</div>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+              Enter the email address on your account. Since there's no email service connected yet, you'll set a new password directly here rather than via a reset link.
+            </p>
+            <div className="field" style={{ marginBottom: 22 }}>
+              <label className="field-label">Email</label>
+              <input className="input" type="email" autoComplete="email" placeholder="you@email.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && findAccount()} />
+            </div>
+            {error && (
+              <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: C.black, fontWeight: 500 }}>
+                {error}
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={findAccount}>Continue</button>
+          </>
+        )}
+
+        {step === "newpassword" && (
+          <>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Set a New Password</div>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+              Setting a new password for <b>{account.name}</b> ({account.email}). Your rounds, handicap, and bag are untouched.
+            </p>
+            <div className="field">
+              <label className="field-label">New Password</label>
+              <input className="input" type="password" autoComplete="new-password" placeholder="••••••••" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+            </div>
+            <div className="field" style={{ marginBottom: 22 }}>
+              <label className="field-label">Confirm New Password</label>
+              <input className="input" type="password" autoComplete="new-password" placeholder="••••••••" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submitNewPassword()} />
+            </div>
+            {error && (
+              <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: C.black, fontWeight: 500 }}>
+                {error}
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={submitNewPassword}>Save New Password</button>
+          </>
+        )}
+
+        {step === "done" && (
+          <>
+            <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <div style={{ width: 20, height: 20, color: C.white }}><Icon.Check /></div>
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Password Updated</div>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+              You can now sign in with your new password.
+            </p>
+            <button className="btn btn-primary" onClick={onBack}>Back to Sign In</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AuthScreen({ onAuth, onShowDebug, onShowReset }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", username: "", password: "", handicap: "" });
   const [error, setError] = useState("");
@@ -884,7 +986,7 @@ function AuthScreen({ onAuth, onShowDebug }) {
             onBlur={e => { if (e.target.value && e.target.value !== form.email) setForm(f => ({ ...f, email: e.target.value })); }}
           />
         </div>
-        <div className="field" style={{ marginBottom: mode === "signup" ? 18 : 30 }}>
+        <div className="field" style={{ marginBottom: mode === "signup" ? 18 : 10 }}>
           <label className="field-label">Password</label>
           <input
             ref={passwordRef} className="input" type="password" name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="••••••••"
@@ -894,6 +996,13 @@ function AuthScreen({ onAuth, onShowDebug }) {
             onBlur={e => { if (e.target.value && e.target.value !== form.password) setForm(f => ({ ...f, password: e.target.value })); }}
           />
         </div>
+        {mode === "login" && (
+          <div style={{ textAlign: "right", marginBottom: 20 }}>
+            <button onClick={onShowReset} style={{ background: "none", border: "none", color: C.steel, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              Forgot password?
+            </button>
+          </div>
+        )}
         {mode === "signup" && (
           <div className="field" style={{ marginBottom: 30 }}>
             <label className="field-label">Handicap Index <span style={{ textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
@@ -936,6 +1045,7 @@ export default function App() {
   const [modulePage, setModulePage] = useState(null); // which module detail screen, if any
   const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited
   const [showDebug, setShowDebug] = useState(false); // TEMPORARY — read-only accounts debug screen
+  const [showReset, setShowReset] = useState(false); // password reset flow
 
   useEffect(() => {
     if (!splash) {
@@ -984,7 +1094,8 @@ export default function App() {
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => setSplash(false)} /></>;
   if (!user) {
     if (showDebug) return <><style>{css}</style><DebugAccountsScreen onBack={() => setShowDebug(false)} /></>;
-    return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); setUser(u); }} onShowDebug={() => setShowDebug(true)} /></>;
+    if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} /></>;
+    return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); setUser(u); }} onShowDebug={() => setShowDebug(true)} onShowReset={() => setShowReset(true)} /></>;
   }
 
   // Accounts created before usernames existed have no username at all —
