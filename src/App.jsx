@@ -223,11 +223,12 @@ const css = `
   .nav-btn svg{width:21px;height:21px;}
 
   /* ── Page header ── */
-  .page-head{background:${C.black};padding:56px 24px 32px;position:relative;overflow:hidden;}
-  .page-head::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle, rgba(255,255,255,.06) 1px, transparent 1px);background-size:16px 16px;mask-image:radial-gradient(ellipse 70% 100% at 100% 0%, black, transparent);pointer-events:none;}
-  .page-head-eyebrow{font-size:10.5px;color:rgba(255,255,255,.4);letter-spacing:.2em;text-transform:uppercase;font-weight:700;margin-bottom:9px;position:relative;z-index:1;}
-  .page-head h1{font-family:'Inter',sans-serif;color:${C.white};font-size:32px;font-weight:900;letter-spacing:-0.03em;line-height:1.02;position:relative;z-index:1;}
-  .page-head p{color:rgba(255,255,255,.5);font-size:13px;margin-top:7px;position:relative;z-index:1;}
+  .page-head{background:${C.white};padding:20px 24px 28px;position:relative;overflow:hidden;}
+  .page-head::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle, rgba(10,10,10,.06) 1px, transparent 1px);background-size:16px 16px;mask-image:radial-gradient(ellipse 70% 100% at 100% 0%, black, transparent);pointer-events:none;}
+  .page-head-eyebrow{font-size:10.5px;color:${C.steel};letter-spacing:.2em;text-transform:uppercase;font-weight:700;margin-bottom:9px;position:relative;z-index:1;}
+  .page-head h1{font-family:'Inter',sans-serif;color:${C.black};font-size:32px;font-weight:900;letter-spacing:-0.03em;line-height:1.02;position:relative;z-index:1;}
+  .page-head p{color:${C.steel};font-size:13px;margin-top:7px;position:relative;z-index:1;}
+  .page-head-back{background:none;border:none;color:${C.steel};font-size:12.5px;cursor:pointer;margin-bottom:14px;padding:0;font-weight:700;display:flex;align-items:center;gap:6px;position:relative;z-index:1;}
 
   /* ── Home screen header — white variant, lighter than the black page-head
      used elsewhere in the app (Play a Round, The Bag, etc.) ── */
@@ -1328,7 +1329,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
         <div className="page-head" style={{ textAlign: "center" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(255,255,255,.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", position: "relative", zIndex: 1 }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", position: "relative", zIndex: 1 }}>
             <div style={{ width: 24, height: 24, color: C.white }}><Icon.Check /></div>
           </div>
           <h1 style={{ fontSize: 24 }}>Round Submitted</h1>
@@ -1365,7 +1366,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
         <div className="page-head">
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
             <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
           </button>
           <div className="page-head-eyebrow">Play A Round</div>
@@ -1417,7 +1418,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
         <div className="page-head">
-          <button onClick={() => setStep("search")} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <button onClick={() => setStep("search")} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
             <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
           </button>
           <div className="page-head-eyebrow">Round Setup</div>
@@ -1560,7 +1561,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       </div>
 
       <div className="page-head" style={{ padding: "20px 22px" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Save & Exit
         </button>
         <h1 style={{ fontSize: 22 }}>{course.name}</h1>
@@ -1734,7 +1735,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
         </div>
       </div>
       <div className="page-head" style={{ padding: "20px 22px" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Editing Round</div>
@@ -1863,7 +1864,7 @@ function BagScreen({ user, onUpdateUser, onBack }) {
   return (
     <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 100 }}>
       <div className="page-head">
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">My Equipment</div>
@@ -2249,7 +2250,7 @@ function PerformanceScreen({ user, onBack }) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
         <div className="page-head">
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
             <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
           </button>
           <div className="page-head-eyebrow">Your Game</div>
@@ -2483,7 +2484,7 @@ function PerformanceScreen({ user, onBack }) {
   return (
     <div style={{ background: C.paper, minHeight: "100vh" }}>
       <div className="page-head">
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Your Game</div>
@@ -2681,7 +2682,7 @@ function LoungeScreen({ user, onUpdateUser, onBack }) {
   return (
     <div>
       <div className="page-head" style={{ paddingBottom: 22 }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Connect</div>
@@ -3234,7 +3235,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
         <div className="page-head">
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
             <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
           </button>
           <div className="page-head-eyebrow">Your Rounds</div>
@@ -3252,7 +3253,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
   return (
     <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 20 }}>
       <div className="page-head">
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Your Rounds</div>
@@ -3466,7 +3467,7 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
   return (
     <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 100 }}>
       <div className="page-head">
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Your Game</div>
@@ -3597,7 +3598,7 @@ function ModulePlaceholder({ module, onBack, embedded }) {
     <>
       <div className="page-head">
         {!embedded && (
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(255,255,255,.6)", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
             <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
           </button>
         )}
