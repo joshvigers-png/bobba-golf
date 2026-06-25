@@ -31,6 +31,49 @@ const LS = {
   del:(k)=>localStorage.removeItem(k),
 };
 
+// ─── Username validation ───────────────────────────────────────────────────────
+// Format: 3-20 chars, letters/numbers/underscores, must start with a letter.
+// This is checked client-side only — see the note in AuthScreen about the
+// real-world limits of "duplicate" checking without a shared backend.
+const USERNAME_FORMAT = /^[a-zA-Z][a-zA-Z0-9_]{2,19}$/;
+
+// A working blocklist of slurs, profanity, and common offensive terms. This
+// is intentionally not exhaustive — no client-side wordlist ever fully is —
+// but covers common cases plus simple leetspeak substitutions people use to
+// route around naive filters (4→a, 3→e, 1→i, 0→o, 5→s, 7→t, @→a, $→s).
+const BLOCKED_TERMS = [
+  "fuck","shit","bitch","cunt","whore","slut","bastard","dick","pussy","cock",
+  "nigger","nigga","faggot","fag","retard","spic","chink","kike","tranny","dyke",
+  "rape","rapist","pedo","pedophile","nazi","hitler","slave","kill","murder",
+  "admin","administrator","moderator","support","official","staff","bobbagolf",
+];
+function normalizeForFilter(s) {
+  return s.toLowerCase()
+    .replace(/4/g, "a").replace(/3/g, "e").replace(/1/g, "i")
+    .replace(/0/g, "o").replace(/5/g, "s").replace(/7/g, "t")
+    .replace(/@/g, "a").replace(/\$/g, "s");
+}
+function containsBlockedTerm(username) {
+  const normalized = normalizeForFilter(username);
+  return BLOCKED_TERMS.some(term => normalized.includes(term));
+}
+
+// Returns an error string, or null if the username is valid and available.
+// `accounts` should be the current bb_accounts list (and excludeId lets a
+// user keep their own existing username when editing their profile later).
+function validateUsername(username, accounts, excludeId = null) {
+  if (!username) return "Username is required.";
+  if (!USERNAME_FORMAT.test(username)) {
+    return "3-20 characters, letters/numbers/underscores only, must start with a letter.";
+  }
+  if (containsBlockedTerm(username)) {
+    return "That username isn't allowed. Please choose another.";
+  }
+  const taken = accounts.some(a => a.id !== excludeId && a.username?.toLowerCase() === username.toLowerCase());
+  if (taken) return "That username is already taken.";
+  return null;
+}
+
 // ─── Course database (demo data — would be an API in production) ────────────
 // ─── Live course search ───────────────────────────────────────────────────────
 // Calls a small server-side proxy (see /golf-proxy/worker.js) which holds the
@@ -634,23 +677,97 @@ function SplashScreen({ onDone }) {
 }
 
 // ─── Auth Screen ──────────────────────────────────────────────────────────────
+// ─── One-time prompt for accounts created before usernames existed ───────────
+function SetUsernameScreen({ user, onSaved }) {
+  const [username, setUsername] = useState("");
+  const [status, setStatus] = useState(null); // null | "ok" | "error"
+  const [error, setError] = useState("");
+
+  const handleChange = (val) => {
+    const cleaned = val.replace(/\s/g, "");
+    setUsername(cleaned);
+    if (!cleaned) { setStatus(null); setError(""); return; }
+    const acc = LS.get("bb_accounts") || [];
+    const err = validateUsername(cleaned, acc, user.id);
+    if (err) { setStatus("error"); setError(err); }
+    else { setStatus("ok"); setError(""); }
+  };
+
+  const save = () => {
+    const acc = LS.get("bb_accounts") || [];
+    const err = validateUsername(username, acc, user.id);
+    if (err) { setStatus("error"); setError(err); return; }
+    onSaved({ ...user, username });
+  };
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-logo-mark">
+        <img src={LOGO_BLACK} alt="BOBBA GOLF" style={{ width: 110 }} />
+      </div>
+      <div className="auth-card">
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Choose a Username</div>
+        <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+          We've added usernames so friends can find and add you in The Lounge. Pick one to continue — this only takes a moment.
+        </p>
+        <div className="field" style={{ marginBottom: 24 }}>
+          <label className="field-label">Username</label>
+          <div style={{ position: "relative" }}>
+            <input
+              className="input"
+              autoFocus
+              placeholder="e.g. joshvigers"
+              value={username}
+              onChange={e => handleChange(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && save()}
+              style={{ paddingRight: 38, borderColor: status === "error" ? C.red : status === "ok" ? "#1B7A3D" : undefined }}
+            />
+            {status && (
+              <div style={{ position: "absolute", right: 13, top: 15, width: 16, height: 16, color: status === "ok" ? "#1B7A3D" : C.red }}>
+                {status === "ok" ? <Icon.Check /> : <Icon.X />}
+              </div>
+            )}
+          </div>
+          {status === "error" && <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{error}</p>}
+          {status === "ok" && <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{username} is available</p>}
+        </div>
+        <button className="btn btn-primary" onClick={save} disabled={status !== "ok"} style={{ opacity: status === "ok" ? 1 : 0.4 }}>
+          Continue
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", handicap: "" });
+  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", handicap: "" });
   const [error, setError] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState(null); // null | "checking" | "ok" | "error"
+  const [usernameError, setUsernameError] = useState("");
+
+  const handleUsernameChange = (val) => {
+    // Usernames don't have spaces — strip them as the person types rather
+    // than rejecting after the fact
+    const cleaned = val.replace(/\s/g, "");
+    setForm({ ...form, username: cleaned });
+    if (!cleaned) { setUsernameStatus(null); setUsernameError(""); return; }
+    const acc = LS.get("bb_accounts") || [];
+    const err = validateUsername(cleaned, acc);
+    if (err) { setUsernameStatus("error"); setUsernameError(err); }
+    else { setUsernameStatus("ok"); setUsernameError(""); }
+  };
 
   const submit = () => {
     setError("");
     const acc = LS.get("bb_accounts") || [];
     if (mode === "signup") {
-      if (!form.name || !form.email || !form.password) { setError("Please complete all fields."); return; }
+      if (!form.name || !form.email || !form.username || !form.password) { setError("Please complete all fields."); return; }
       if (acc.find(a => a.email === form.email)) { setError("An account with this email already exists."); return; }
-      // Auto-derive a unique @username from the name (e.g. "John Smith" -> "johnsmith", "johnsmith2"...)
-      const base = form.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-      let username = base, n = 1;
-      while (acc.some(a => a.username === username)) { n++; username = `${base}${n}`; }
+      const usernameErr = validateUsername(form.username, acc);
+      if (usernameErr) { setError(usernameErr); return; }
       const u = {
-        id: Date.now(), name: form.name, username, email: form.email, password: form.password,
+        id: Date.now(), name: form.name, username: form.username, email: form.email, password: form.password,
         handicap: form.handicap ? parseFloat(form.handicap) : null,
         handicapHistory: [], bag: [], joined: Date.now(), friends: [], friendRequests: [],
       };
@@ -682,6 +799,31 @@ function AuthScreen({ onAuth }) {
           <div className="field">
             <label className="field-label">Full Name</label>
             <input className="input" placeholder="Your name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+          </div>
+        )}
+        {mode === "signup" && (
+          <div className="field">
+            <label className="field-label">Username</label>
+            <div style={{ position: "relative" }}>
+              <input
+                className="input"
+                placeholder="e.g. joshvigers"
+                value={form.username}
+                onChange={e => handleUsernameChange(e.target.value)}
+                style={{ paddingRight: 38, borderColor: usernameStatus === "error" ? C.red : usernameStatus === "ok" ? "#1B7A3D" : undefined }}
+              />
+              {usernameStatus && (
+                <div style={{ position: "absolute", right: 13, top: 15, width: 16, height: 16, color: usernameStatus === "ok" ? "#1B7A3D" : C.red }}>
+                  {usernameStatus === "ok" ? <Icon.Check /> : <Icon.X />}
+                </div>
+              )}
+            </div>
+            {usernameStatus === "error" && (
+              <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{usernameError}</p>
+            )}
+            {usernameStatus === "ok" && (
+              <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{form.username} is available</p>
+            )}
           </div>
         )}
         <div className="field">
@@ -777,6 +919,12 @@ export default function App() {
 
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => setSplash(false)} /></>;
   if (!user) return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); setUser(u); }} /></>;
+
+  // Accounts created before usernames existed have no username at all —
+  // prompt for one once, then this never shows again for that account.
+  if (!user.username) {
+    return <><style>{css}</style><SetUsernameScreen user={user} onSaved={updateUser} /></>;
+  }
 
   // Reviewing/editing a previously submitted round — full screen
   if (reviewRound) {
@@ -994,14 +1142,33 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
 // ─── Profile Screen (baseline) ────────────────────────────────────────────────
 function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: user.name, handicap: user.handicap != null ? String(user.handicap) : "" });
+  const [form, setForm] = useState({ name: user.name, username: user.username || "", handicap: user.handicap != null ? String(user.handicap) : "" });
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
+  const [usernameError, setUsernameError] = useState("");
   const photoInputRef = useRef(null);
 
+  const handleUsernameChange = (val) => {
+    const cleaned = val.replace(/\s/g, "");
+    setForm({ ...form, username: cleaned });
+    if (!cleaned) { setUsernameStatus(null); setUsernameError(""); return; }
+    if (cleaned === user.username) { setUsernameStatus("unchanged"); setUsernameError(""); return; }
+    const acc = LS.get("bb_accounts") || [];
+    const err = validateUsername(cleaned, acc, user.id);
+    if (err) { setUsernameStatus("error"); setUsernameError(err); }
+    else { setUsernameStatus("ok"); setUsernameError(""); }
+  };
+
   const save = () => {
-    onUpdate({ ...user, name: form.name, handicap: form.handicap ? parseFloat(form.handicap) : null });
+    // Re-validate the username one last time before saving, same as signup
+    if (form.username !== user.username) {
+      const acc = LS.get("bb_accounts") || [];
+      const err = validateUsername(form.username, acc, user.id);
+      if (err) { setUsernameStatus("error"); setUsernameError(err); return; }
+    }
+    onUpdate({ ...user, name: form.name, username: form.username, handicap: form.handicap ? parseFloat(form.handicap) : null });
     setEditing(false);
   };
 
@@ -1041,6 +1208,29 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
               <label className="field-label">Name</label>
               <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             </div>
+            <div className="field">
+              <label className="field-label">Username</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  className="input"
+                  placeholder="e.g. joshvigers"
+                  value={form.username}
+                  onChange={e => handleUsernameChange(e.target.value)}
+                  style={{ paddingRight: 38, borderColor: usernameStatus === "error" ? C.red : usernameStatus === "ok" ? "#1B7A3D" : undefined }}
+                />
+                {(usernameStatus === "ok" || usernameStatus === "error") && (
+                  <div style={{ position: "absolute", right: 13, top: 15, width: 16, height: 16, color: usernameStatus === "ok" ? "#1B7A3D" : C.red }}>
+                    {usernameStatus === "ok" ? <Icon.Check /> : <Icon.X />}
+                  </div>
+                )}
+              </div>
+              {usernameStatus === "error" && (
+                <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{usernameError}</p>
+              )}
+              {usernameStatus === "ok" && (
+                <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{form.username} is available</p>
+              )}
+            </div>
             <div className="field" style={{ marginBottom: 22 }}>
               <label className="field-label">Handicap Index</label>
               <input className="input" type="number" step="0.1" min="0" max="54" value={form.handicap} onChange={e => setForm({ ...form, handicap: e.target.value })} />
@@ -1053,6 +1243,13 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
         ) : (
           <>
             <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, fontSize: 21, color: C.black }}>{user.name}</div>
+            {user.username ? (
+              <div style={{ fontSize: 13, color: C.steel, marginTop: 3, fontWeight: 600 }}>@{user.username}</div>
+            ) : (
+              <button onClick={() => setEditing(true)} style={{ background: "none", border: "none", color: C.red, fontSize: 12, fontWeight: 700, marginTop: 4, cursor: "pointer", padding: 0 }}>
+                Set a username →
+              </button>
+            )}
             <div style={{ fontSize: 12.5, color: C.steel, marginTop: 3 }}>{user.email}</div>
 
             <div style={{ display: "flex", justifyContent: "center", gap: 30, margin: "22px 0 4px" }}>
@@ -2843,12 +3040,12 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
         <div className="sheet-handle" />
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 16 }}>Add a Friend</div>
         <div className="field" style={{ position: "relative" }}>
-          <input className="input" autoFocus placeholder="Search username or email…" value={query} onChange={e => setQuery(e.target.value)} style={{ paddingLeft: 38 }} />
+          <input className="input" autoFocus placeholder="Search by name or username…" value={query} onChange={e => setQuery(e.target.value)} style={{ paddingLeft: 38 }} />
           <div style={{ position: "absolute", left: 13, top: 14, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
         </div>
 
         {query.trim().length === 0 && (
-          <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "20px 10px" }}>Start typing a username or email to search.</p>
+          <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "20px 10px" }}>Start typing a name or username to search.</p>
         )}
         {query.trim().length > 0 && results.length === 0 && (
           <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "20px 10px" }}>No golfers found matching "{query}".</p>
