@@ -256,6 +256,21 @@ function calcHandicapIndex(diffs) {
   return Math.round(avg * 0.96 * 10) / 10;
 }
 
+// Decides whether the system should take over calculating someone's handicap
+// from their round history, or leave their manually-entered starting figure
+// alone. Rule: if they typed in a starting handicap and the system has never
+// calculated one for them before, wait until they've logged at least 3 valid
+// rounds (the WHS minimum for a first real index) before taking over. Once
+// the system has started (handicapHistory has at least one entry), keep
+// updating every round as normal — this only protects the very first switch
+// from "what I told you" to "what your scores actually show."
+function shouldAutoUpdateHandicap(user, diffs) {
+  const hasManualStart = user.handicap != null;
+  const systemAlreadyCalculating = (user.handicapHistory || []).length > 0;
+  if (!hasManualStart || systemAlreadyCalculating) return true;
+  return diffs.length >= 3;
+}
+
 // ─── Global CSS ───────────────────────────────────────────────────────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
@@ -1426,8 +1441,14 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
     // blank (so editing your name doesn't accidentally wipe your security
     // answer just because this field defaults empty for privacy).
     const securityAnswer = form.securityAnswer.trim() ? normalizeAnswer(form.securityAnswer) : user.securityAnswer;
+    // Same protection for handicap: only treat it as "intentionally cleared"
+    // if the field is blank AND the user already had no handicap to begin
+    // with. If they had a real handicap and the field is blank (e.g. it was
+    // accidentally cleared while editing something else), keep the existing
+    // value rather than silently wiping it to null.
+    const handicap = form.handicap.trim() ? parseFloat(form.handicap) : (user.handicap ?? null);
     onUpdate({
-      ...user, name: form.name, username: form.username, handicap: form.handicap ? parseFloat(form.handicap) : null,
+      ...user, name: form.name, username: form.username, handicap,
       securityQuestion: form.securityQuestion, securityAnswer,
     });
     setEditing(false);
@@ -1823,10 +1844,12 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     LS.set(`bb_rounds_${user.id}`, nextRounds);
     LS.del(`bb_active_round_${user.id}`);
 
-    // Recalculate handicap index per WHS
+    // Recalculate handicap index per WHS — but don't let it silently override
+    // a manually-entered starting handicap until there's enough real data
+    // (3+ rounds) to credibly take over.
     const diffs = nextRounds.filter(r => r.differential != null).map(r => r.differential);
     const newIndex = calcHandicapIndex(diffs);
-    if (newIndex != null) {
+    if (newIndex != null && shouldAutoUpdateHandicap(user, diffs)) {
       const history = [...(user.handicapHistory || []), { value: newIndex, date: setup.date, roundId: record.id }];
       onUpdateUser({ ...user, handicap: newIndex, handicapHistory: history });
     }
@@ -2148,7 +2171,11 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
     LS.set(`bb_rounds_${user.id}`, next);
     const diffs = next.filter(r => r.differential != null).map(r => r.differential);
     const newIndex = calcHandicapIndex(diffs);
-    if (newIndex != null) {
+    // Same protection as round submission: don't let a recalculation
+    // overwrite a manually-entered handicap before there's enough real data
+    // (3+ rounds) to credibly take over, and never write a null/blank value
+    // over a real number just because the differential pool is currently empty.
+    if (newIndex != null && shouldAutoUpdateHandicap(user, diffs)) {
       // Replace any existing history entry tied to this round (editing shouldn't create duplicate points)
       const withoutThisRound = (user.handicapHistory || []).filter(h => h.roundId !== round.id);
       const history = [...withoutThisRound, { value: newIndex, date: round.date, roundId: round.id }];
@@ -3729,10 +3756,16 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
     LS.set(`bb_rounds_${user.id}`, next);
     setAllRounds(next);
 
-    // Removing a round changes the differential pool — recalculate the handicap index
+    // Removing a round changes the differential pool — recalculate the
+    // handicap index, but never overwrite a real handicap with a blank one
+    // just because there are currently zero rounds with a valid differential
+    // (e.g. deleting down to nothing, or down to rounds that never had
+    // course rating/slope data available). Keep the last known value instead.
     const diffs = next.filter(r => r.differential != null).map(r => r.differential);
     const newIndex = calcHandicapIndex(diffs);
-    if (onUpdateUser) onUpdateUser({ ...user, handicap: newIndex });
+    if (newIndex != null && shouldAutoUpdateHandicap(user, diffs)) {
+      if (onUpdateUser) onUpdateUser({ ...user, handicap: newIndex });
+    }
 
     setDeleteTarget(null);
   };
