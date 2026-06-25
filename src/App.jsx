@@ -1643,7 +1643,13 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       // The detail endpoint wraps the course in a "courses" array, same as
       // search (e.g. {"courses":[{...}]}), rather than returning the course
       // object directly at the top level.
-      const raw = Array.isArray(data.courses) ? data.courses[0] : data;
+      // Confirmed from the real API: the detail endpoint wraps its response
+      // as {"course": {...}} — singular key, no array — which is DIFFERENT
+      // from the search endpoint's {"courses": [...]} (plural, array). This
+      // was the actual bug: checking for the plural key here always failed
+      // silently, so `raw` ended up being the wrapper object itself instead
+      // of the real course data inside it.
+      const raw = data.course || (Array.isArray(data.courses) ? data.courses[0] : data);
       if (!raw) throw new Error("No course data returned");
       const normalized = normalizeApiCourse(raw);
       setCourse(normalized);
