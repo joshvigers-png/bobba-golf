@@ -745,6 +745,8 @@ function AuthScreen({ onAuth }) {
   const [error, setError] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "checking" | "ok" | "error"
   const [usernameError, setUsernameError] = useState("");
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
 
   const handleUsernameChange = (val) => {
     // Usernames don't have spaces — strip them as the person types rather
@@ -760,21 +762,27 @@ function AuthScreen({ onAuth }) {
 
   const submit = () => {
     setError("");
+    // Defensive fallback: some autofill flows (notably iOS Safari/iCloud
+    // Keychain) can populate the visible input without reliably firing the
+    // React onChange that keeps `form` state in sync. If the DOM field shows
+    // a value but our state doesn't, trust the DOM at submit time.
+    const email = form.email || emailRef.current?.value || "";
+    const password = form.password || passwordRef.current?.value || "";
     const acc = LS.get("bb_accounts") || [];
     if (mode === "signup") {
-      if (!form.name || !form.email || !form.username || !form.password) { setError("Please complete all fields."); return; }
-      if (acc.find(a => a.email === form.email)) { setError("An account with this email already exists."); return; }
+      if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
+      if (acc.find(a => a.email === email)) { setError("An account with this email already exists."); return; }
       const usernameErr = validateUsername(form.username, acc);
       if (usernameErr) { setError(usernameErr); return; }
       const u = {
-        id: Date.now(), name: form.name, username: form.username, email: form.email, password: form.password,
+        id: Date.now(), name: form.name, username: form.username, email, password,
         handicap: form.handicap ? parseFloat(form.handicap) : null,
         handicapHistory: [], bag: [], joined: Date.now(), friends: [], friendRequests: [],
       };
       LS.set("bb_accounts", [...acc, u]);
       onAuth(u);
     } else {
-      const u = acc.find(a => a.email === form.email && a.password === form.password);
+      const u = acc.find(a => a.email === email && a.password === password);
       if (!u) { setError("Incorrect email or password."); return; }
       onAuth(u);
     }
@@ -828,11 +836,23 @@ function AuthScreen({ onAuth }) {
         )}
         <div className="field">
           <label className="field-label">Email</label>
-          <input className="input" type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+          <input
+            ref={emailRef} className="input" type="email" name="email" autoComplete="email" placeholder="you@email.com"
+            value={form.email}
+            onChange={e => setForm({ ...form, email: e.target.value })}
+            onInput={e => setForm(f => ({ ...f, email: e.target.value }))}
+            onBlur={e => { if (e.target.value && e.target.value !== form.email) setForm(f => ({ ...f, email: e.target.value })); }}
+          />
         </div>
         <div className="field" style={{ marginBottom: mode === "signup" ? 18 : 30 }}>
           <label className="field-label">Password</label>
-          <input className="input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+          <input
+            ref={passwordRef} className="input" type="password" name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="••••••••"
+            value={form.password}
+            onChange={e => setForm({ ...form, password: e.target.value })}
+            onInput={e => setForm(f => ({ ...f, password: e.target.value }))}
+            onBlur={e => { if (e.target.value && e.target.value !== form.password) setForm(f => ({ ...f, password: e.target.value })); }}
+          />
         </div>
         {mode === "signup" && (
           <div className="field" style={{ marginBottom: 30 }}>
