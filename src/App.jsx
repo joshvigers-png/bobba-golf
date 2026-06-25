@@ -1645,7 +1645,14 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       // object directly at the top level.
       const raw = Array.isArray(data.courses) ? data.courses[0] : data;
       if (!raw) throw new Error("No course data returned");
-      setCourse(normalizeApiCourse(raw));
+      const normalized = normalizeApiCourse(raw);
+      setCourse(normalized);
+      // Default to yellow tees (the most commonly played worldwide) when
+      // available; otherwise fall back to whichever tee the course actually
+      // has, or leave unset entirely if this course has no tee data at all.
+      const teeKeys = Object.keys(normalized.tees);
+      const defaultTee = teeKeys.includes("yellow") ? "yellow" : (teeKeys[0] || null);
+      setSetup(s => ({ ...s, tee: defaultTee }));
       setStep("setup");
     } catch (e) {
       setSearchError("Couldn't load that course's scorecard — please try again or pick a different course.");
@@ -1843,18 +1850,27 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
             </div>
           </div>
 
-          <div className="field" style={{ marginBottom: 30 }}>
-            <label className="field-label">Tees Playing</label>
-            <div className="tee-grid">
-              {Object.entries(course.tees).map(([key, t]) => (
-                <div key={key} className={`tee-pill ${setup.tee===key?"on":""}`} onClick={() => setSetup({ ...setup, tee: key })}>
-                  <div className="tee-swatch" style={{ background: key }} />
-                  <div className="tee-pill-name">{key}</div>
-                  <div className="tee-pill-meta">CR {t.rating} / SL {t.slope}</div>
-                </div>
-              ))}
+          {Object.keys(course.tees).length > 0 ? (
+            <div className="field" style={{ marginBottom: 30 }}>
+              <label className="field-label">Tees Playing</label>
+              <div className="tee-grid">
+                {Object.entries(course.tees).map(([key, t]) => (
+                  <div key={key} className={`tee-pill ${setup.tee===key?"on":""}`} onClick={() => setSetup({ ...setup, tee: key })}>
+                    <div className="tee-swatch" style={{ background: key }} />
+                    <div className="tee-pill-name">{key}</div>
+                    <div className="tee-pill-meta">CR {t.rating} / SL {t.slope}</div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="field" style={{ marginBottom: 30 }}>
+              <label className="field-label">Tees Playing</label>
+              <p style={{ fontSize: 12, color: C.steel, lineHeight: 1.5 }}>
+                Tee and yardage data isn't available for this course yet. You can still play and log your score — par and stroke index will use standard defaults, and your handicap differential won't be calculated for this round.
+              </p>
+            </div>
+          )}
 
           <button className="btn btn-primary" onClick={startRound}>Start Round</button>
         </div>
@@ -1876,7 +1892,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         <div className="hole-top">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div className="hole-num-badge">{h.n}</div>
-            <div className="hole-meta">Par <b>{h.par}</b> · SI <b>{h.si}</b> · <b>{h.yds[teeKey]}</b>y</div>
+            <div className="hole-meta">Par <b>{h.par}</b> · SI <b>{h.si}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
           </div>
           <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
         </div>
@@ -1965,7 +1981,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Save & Exit
         </button>
         <h1 style={{ fontSize: 22 }}>{course.name}</h1>
-        <p>{teeKey.charAt(0).toUpperCase()+teeKey.slice(1)} tees · Par {totalPar} · {totalYds}y · {setup.conditions}</p>
+        <p>{teeKey ? `${teeKey.charAt(0).toUpperCase()+teeKey.slice(1)} tees · ` : ""}Par {totalPar}{totalYds ? ` · ${totalYds}y` : ""} · {setup.conditions}</p>
       </div>
 
       <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">Front Nine</span></div>
@@ -2051,7 +2067,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
         <div className="hole-top">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div className="hole-num-badge">{h.n}</div>
-            <div className="hole-meta">Par <b>{h.par}</b> · SI <b>{h.si}</b> · <b>{h.yds[teeKey]}</b>y</div>
+            <div className="hole-meta">Par <b>{h.par}</b> · SI <b>{h.si}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
           </div>
           <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
         </div>
