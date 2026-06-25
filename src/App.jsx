@@ -1994,7 +1994,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         <div className="hole-top">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div className="hole-num-badge">{h.n}</div>
-            <div className="hole-meta">Par <b>{h.par}</b> · SI <b>{h.si}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
+            <div className="hole-meta">Par <b>{h.par}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
           </div>
           <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
         </div>
@@ -2169,7 +2169,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
         <div className="hole-top">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div className="hole-num-badge">{h.n}</div>
-            <div className="hole-meta">Par <b>{h.par}</b> · SI <b>{h.si}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
+            <div className="hole-meta">Par <b>{h.par}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
           </div>
           <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
         </div>
@@ -3293,6 +3293,14 @@ function FriendsTab({ user, onUpdateUser, myFriends, myRequests, resolveProfile,
 // ─── Friend search sheet ──────────────────────────────────────────────────────
 function FriendSearchSheet({ user, onUpdateUser, onClose }) {
   const [query, setQuery] = useState("");
+  // KNOWN LIMITATION (logged 25 June 2026 — see ROADMAP.md): this only
+  // searches accounts that exist in THIS browser's own localStorage, plus
+  // the seeded DEMO_MEMBERS. There is no shared backend, so a real friend's
+  // account created on their own device/browser will never appear here.
+  // Confirmed real-world: searching a genuine username from another tester's
+  // phone (e.g. "NJH1") correctly returns nothing, because that account was
+  // never written to this device's storage. Fixing this requires a real
+  // shared database — see ROADMAP.md for the deferred plan.
   const acc = (LS.get("bb_accounts") || []).filter(a => a.id !== user.id);
   const pool = [...acc, ...DEMO_MEMBERS];
 
