@@ -739,7 +739,43 @@ function SetUsernameScreen({ user, onSaved }) {
   );
 }
 
-function AuthScreen({ onAuth }) {
+// ─── TEMPORARY diagnostic screen — read-only view of stored accounts, used to
+// debug a real login issue. Safe to remove once resolved; makes no changes. ──
+function DebugAccountsScreen({ onBack }) {
+  const acc = LS.get("bb_accounts") || [];
+  const mask = (pw) => pw ? `${pw[0]}${"•".repeat(Math.max(0, pw.length - 2))}${pw[pw.length-1]}` : "(empty)";
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-card" style={{ maxHeight: "80vh", overflowY: "auto" }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 16, padding: 0, fontWeight: 700 }}>
+          ← Back to Sign In
+        </button>
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Stored Accounts (Debug)</div>
+        <p style={{ fontSize: 11.5, color: C.steel, marginBottom: 18, lineHeight: 1.6 }}>
+          Read-only — nothing here changes your data. {acc.length} account{acc.length!==1?"s":""} found in this browser.
+        </p>
+        {acc.length === 0 && (
+          <p style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>No accounts found in this browser's storage at all.</p>
+        )}
+        {acc.map(a => (
+          <div key={a.id} style={{ border: `1px solid ${C.line}`, padding: 14, marginBottom: 10, borderRadius: 2 }}>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>{a.name}</div>
+            <div style={{ fontSize: 12, color: C.steel, marginTop: 4, fontFamily: "monospace" }}>
+              email: "{a.email}"<br/>
+              email length: {a.email?.length ?? 0}<br/>
+              password (masked): {mask(a.password)}<br/>
+              password length: {a.password?.length ?? 0}<br/>
+              username: {a.username || "(none set)"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AuthScreen({ onAuth, onShowDebug }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", username: "", password: "", handicap: "" });
   const [error, setError] = useState("");
@@ -885,6 +921,9 @@ function AuthScreen({ onAuth }) {
       <p style={{ color: C.ash, fontSize: 10, marginTop: 30, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 600, position: "relative", zIndex: 1, animation: "fadeUp .6s cubic-bezier(.16,1,.3,1) .4s both", opacity: 0 }}>
         Est. for the modern golfer
       </p>
+      <button onClick={onShowDebug} style={{ background: "none", border: "none", color: C.fog, fontSize: 10, marginTop: 14, cursor: "pointer", textDecoration: "underline" }}>
+        Trouble signing in?
+      </button>
     </div>
   );
 }
@@ -896,6 +935,7 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [modulePage, setModulePage] = useState(null); // which module detail screen, if any
   const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited
+  const [showDebug, setShowDebug] = useState(false); // TEMPORARY — read-only accounts debug screen
 
   useEffect(() => {
     if (!splash) {
@@ -942,7 +982,10 @@ export default function App() {
   };
 
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => setSplash(false)} /></>;
-  if (!user) return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); setUser(u); }} /></>;
+  if (!user) {
+    if (showDebug) return <><style>{css}</style><DebugAccountsScreen onBack={() => setShowDebug(false)} /></>;
+    return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); setUser(u); }} onShowDebug={() => setShowDebug(true)} /></>;
+  }
 
   // Accounts created before usernames existed have no username at all —
   // prompt for one once, then this never shows again for that account.
