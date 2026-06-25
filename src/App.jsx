@@ -766,12 +766,16 @@ function AuthScreen({ onAuth }) {
     // Keychain) can populate the visible input without reliably firing the
     // React onChange that keeps `form` state in sync. If the DOM field shows
     // a value but our state doesn't, trust the DOM at submit time.
-    const email = form.email || emailRef.current?.value || "";
+    const emailRaw = form.email || emailRef.current?.value || "";
     const password = form.password || passwordRef.current?.value || "";
+    // Emails are case-insensitive by convention, and autofill/typing can add
+    // stray leading/trailing whitespace — normalize before any comparison so
+    // "Josh@x.com" and "josh@x.com " are correctly treated as the same account.
+    const email = emailRaw.trim().toLowerCase();
     const acc = LS.get("bb_accounts") || [];
     if (mode === "signup") {
       if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
-      if (acc.find(a => a.email === email)) { setError("An account with this email already exists."); return; }
+      if (acc.find(a => a.email?.trim().toLowerCase() === email)) { setError("An account with this email already exists."); return; }
       const usernameErr = validateUsername(form.username, acc);
       if (usernameErr) { setError(usernameErr); return; }
       const u = {
@@ -782,7 +786,7 @@ function AuthScreen({ onAuth }) {
       LS.set("bb_accounts", [...acc, u]);
       onAuth(u);
     } else {
-      const u = acc.find(a => a.email === email && a.password === password);
+      const u = acc.find(a => a.email?.trim().toLowerCase() === email && a.password === password);
       if (!u) { setError("Incorrect email or password."); return; }
       onAuth(u);
     }
