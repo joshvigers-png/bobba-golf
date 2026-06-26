@@ -1685,8 +1685,16 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     const handle = setTimeout(async () => {
       try {
         const res = await fetch(`${COURSE_API_PROXY}/search?q=${encodeURIComponent(query)}`);
-        if (!res.ok) throw new Error(`Search failed (${res.status})`);
         const data = await res.json();
+        // The proxy passes through whatever status/body GolfCourseAPI sent,
+        // including rate-limit errors — check the body for that specific
+        // case before treating this as a generic failure, since the fix
+        // ("wait for the daily limit to reset") is different from a real
+        // network/proxy problem.
+        if (!res.ok || data?.error) {
+          const isRateLimit = typeof data?.error === "string" && data.error.toLowerCase().includes("rate limit");
+          throw new Error(isRateLimit ? "RATE_LIMIT" : `Search failed (${res.status})`);
+        }
         const mapped = (data.courses || []).map(c => ({
           id: c.id,
           name: buildCourseName(c),
@@ -1702,7 +1710,11 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           c.name.toLowerCase().includes(query.toLowerCase()) || c.location.toLowerCase().includes(query.toLowerCase())
         );
         setSearchResults(local);
-        setSearchError(local.length ? "" : "Couldn't reach the course directory — showing local results only.");
+        if (e.message === "RATE_LIMIT") {
+          setSearchError("Course search has hit today's request limit — showing local results only. It resets within 24 hours.");
+        } else {
+          setSearchError(local.length ? "" : "Couldn't reach the course directory — showing local results only.");
+        }
       } finally {
         setSearching(false);
       }
@@ -1748,8 +1760,11 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     setLoadingCourse(true);
     try {
       const res = await fetch(`${COURSE_API_PROXY}/course/${c.id}`);
-      if (!res.ok) throw new Error(`Course detail failed (${res.status})`);
       const data = await res.json();
+      if (!res.ok || data?.error) {
+        const isRateLimit = typeof data?.error === "string" && data.error.toLowerCase().includes("rate limit");
+        throw new Error(isRateLimit ? "RATE_LIMIT" : `Course detail failed (${res.status})`);
+      }
       // The detail endpoint wraps the course in a "courses" array, same as
       // search (e.g. {"courses":[{...}]}), rather than returning the course
       // object directly at the top level.
@@ -1771,7 +1786,11 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       setSetup(s => ({ ...s, tee: defaultTee }));
       setStep("setup");
     } catch (e) {
-      setSearchError("Couldn't load that course's scorecard — please try again or pick a different course.");
+      if (e.message === "RATE_LIMIT") {
+        setSearchError("Course search has hit today's request limit — try again within 24 hours, or pick a local course below.");
+      } else {
+        setSearchError("Couldn't load that course's scorecard — please try again or pick a different course.");
+      }
     } finally {
       setLoadingCourse(false);
     }
