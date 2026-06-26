@@ -1134,12 +1134,30 @@ export default function App() {
   const [modulePage, setModulePage] = useState(null); // which module detail screen, if any
   const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited
   const [showReset, setShowReset] = useState(false); // password reset flow
+  const [briefing, setBriefing] = useState(null); // login welcome-back popup: { briefing, hasNoRounds } | null
 
   useEffect(() => {
     if (!splash) {
       setUser(LS.get("bb_user"));
     }
   }, [splash]);
+
+  // Build the "welcome back" briefing every time a user becomes logged in —
+  // this covers both a fresh sign-in (AuthScreen -> onAuth) and reopening
+  // the app with an already-saved session (the effect above), since both
+  // count as "a login" per the brief. Shows the same message every login
+  // until a new round is submitted, since it's always built fresh from
+  // whatever the most recent round currently is.
+  useEffect(() => {
+    if (!user || !user.username) { setBriefing(null); return; } // not logged in yet, or mid SetUsername flow
+    const rounds = LS.get(`bb_rounds_${user.id}`) || [];
+    if (rounds.length === 0) {
+      setBriefing({ briefing: null, hasNoRounds: true });
+      return;
+    }
+    const lastRound = rounds[rounds.length - 1];
+    setBriefing({ briefing: buildLastRoundBriefing(user, lastRound), hasNoRounds: false });
+  }, [user?.id]);
 
   const updateUser = (u) => {
     const acc = LS.get("bb_accounts") || [];
@@ -1310,12 +1328,168 @@ export default function App() {
             </button>
           ))}
         </nav>
+        {tab === "home" && briefing && (
+          <LastRoundBriefingModal
+            user={user}
+            briefing={briefing.briefing}
+            hasNoRounds={briefing.hasNoRounds}
+            onClose={() => setBriefing(null)}
+          />
+        )}
       </div>
     </>
   );
 }
 
 // ─── Home Dashboard ───────────────────────────────────────────────────────────
+// ─── Login welcome-back briefing ─────────────────────────────────────────────
+// Builds a short, specific summary of the user's most recent round, plus a
+// single "work on this at the range" recommendation. Deliberately looks at
+// ONLY the last round (not an aggregate across many rounds, which is what
+// the main Performance tab already does) — this is meant to feel like
+// "here's what just happened last time", not a full stats review.
+function buildLastRoundBriefing(user, round) {
+  const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
+  const par = round.coursePar ?? (course ? course.holes.reduce((s,h)=>s+h.par,0) : null);
+
+  // Walk this round's holes to get FIR/GIR misses and putting detail —
+  // same shape of logic as Performance's holeStats builder, but scoped to
+  // just this one round.
+  let firMisses = 0, firTotal = 0, girMisses = 0, girTotal = 0;
+  let threePutts = 0, puttedHoles = 0, totalPutts = 0;
+  if (course) {
+    course.holes.forEach(h => {
+      const s = round.scores?.[h.n];
+      if (!s?.strokes) return;
+      if (h.par >= 4 && s.fir != null) { firTotal++; if (!s.fir) firMisses++; }
+      if (s.gir != null) { girTotal++; if (!s.gir) girMisses++; }
+      if (s.putts != null) { puttedHoles++; totalPutts += parseInt(s.putts) || 0; if (parseInt(s.putts) >= 3) threePutts++; }
+    });
+  }
+
+  const lostBalls = round.totalLost || 0;
+  const firRate = firTotal ? (firTotal - firMisses) / firTotal : null;
+  const girRate = girTotal ? (girTotal - girMisses) / girTotal : null;
+  const threePuttRate = puttedHoles ? threePutts / puttedHoles : null;
+
+  // Pick ONE weakest area to recommend, ranked by how far outside a
+  // reasonable range each stat is — same RAG-style thresholds as Performance,
+  // so the advice here never contradicts what the Performance tab would say.
+  const candidates = [];
+  if (threePuttRate != null && threePuttRate >= 0.15) {
+    candidates.push({ score: threePuttRate * 1.4, area: "putting", detail: `you 3-putted ${threePutts} of your ${puttedHoles} logged holes`, drill: "lag putting to a target from 20-40ft, not just tap-ins" });
+  }
+  if (girRate != null && girRate < 0.35) {
+    candidates.push({ score: 1 - girRate, area: "approach play", detail: `you hit only ${girMisses ? (girTotal - girMisses) : 0} of ${girTotal} greens in regulation`, drill: "iron yardages — knowing your real carry distance, not your best-ever shot" });
+  }
+  if (firRate != null && firRate < 0.45) {
+    candidates.push({ score: (1 - firRate) * 0.9, area: "driving accuracy", detail: `you missed ${firMisses} of ${firTotal} fairways`, drill: "a club off the tee you can find the fairway with consistently" });
+  }
+  if (lostBalls >= 2) {
+    candidates.push({ score: lostBalls / 5, area: "course management", detail: `you lost ${lostBalls} ball${lostBalls!==1?"s":""}`, drill: "playing safer lines off the tee on holes that punish a miss" });
+  }
+  candidates.sort((a,b) => b.score - a.score);
+  const focus = candidates[0] || null;
+
+  return {
+    courseName: round.courseName,
+    date: round.date,
+    totalGross: round.totalGross,
+    totalPts: round.totalPts,
+    par,
+    lostBalls,
+    firMisses, firTotal,
+    girMisses, girTotal,
+    threePutts, puttedHoles,
+    focus,
+  };
+}
+
+// ─── Login welcome-back modal ────────────────────────────────────────────────
+function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose }) {
+  const firstName = user.name.split(" ")[0];
+
+  if (hasNoRounds) {
+    return (
+      <div className="sheet-overlay" onClick={onClose}>
+        <div className="sheet" onClick={e => e.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+            <div style={{ width: 20, height: 20, color: C.black }}><Icon.ModRound /></div>
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Hi, {firstName}</div>
+          <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 22 }}>
+            You haven't logged a round yet. Submit your first scorecard from Play a Round and I'll start giving you a personal breakdown here each time you log in — what went well, what to work on, and a focus for the range.
+          </p>
+          <button className="btn btn-primary" onClick={onClose}>Got it</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!briefing) return null;
+  const { courseName, date, totalGross, totalPts, par, lostBalls, firMisses, firTotal, girMisses, girTotal, threePutts, puttedHoles, focus } = briefing;
+  const toPar = par != null && totalGross ? totalGross - par : null;
+  const dateLabel = new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+
+  return (
+    <div className="sheet-overlay" onClick={onClose}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Hi, {firstName}</div>
+        <p style={{ fontSize: 12, color: C.steel, marginBottom: 18 }}>Your round at {courseName} on {dateLabel}</p>
+
+        <div className="round-summary-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 18, paddingBottom: 18, borderBottom: `1px solid ${C.line}` }}>
+          <div className="round-summary-item">
+            <div className="round-summary-val">{totalGross || "—"}</div>
+            <div className="round-summary-lbl">Strokes</div>
+          </div>
+          <div className="round-summary-item">
+            <div className="round-summary-val">{totalPts ?? "—"}</div>
+            <div className="round-summary-lbl">Points</div>
+          </div>
+          <div className="round-summary-item">
+            <div className="round-summary-val" style={{ color: toPar == null ? C.black : toPar > 0 ? "#C8392D" : toPar < 0 ? "#1B7A3D" : C.black }}>
+              {toPar == null ? "—" : toPar > 0 ? `+${toPar}` : toPar}
+            </div>
+            <div className="round-summary-lbl">To Par</div>
+          </div>
+          <div className="round-summary-item">
+            <div className="round-summary-val">{lostBalls}</div>
+            <div className="round-summary-lbl">Lost Balls</div>
+          </div>
+        </div>
+
+        <p style={{ fontSize: 13.5, color: C.charcoal, lineHeight: 1.7, marginBottom: 18 }}>
+          You shot {totalGross} for {totalPts} Stableford points{toPar != null ? ` (${toPar > 0 ? "+" : ""}${toPar} to par)` : ""}.{" "}
+          {girTotal > 0 && <>You hit {girTotal - girMisses} of {girTotal} greens in regulation{firTotal > 0 ? ` and ${firTotal - firMisses} of ${firTotal} fairways` : ""}.{" "}</>}
+          {puttedHoles > 0 && <>You took {threePutts > 0 ? `${threePutts} three-putt${threePutts!==1?"s":""} across` : "no three-putts in"} {puttedHoles} logged hole{puttedHoles!==1?"s":""}.{" "}</>}
+          {lostBalls > 0 && <>You lost {lostBalls} ball{lostBalls!==1?"s":""} out there too.</>}
+        </p>
+
+        {focus ? (
+          <div className="advice-card" style={{ margin: "0 0 18px" }}>
+            <div className="advice-tag">Focus This Week</div>
+            <div className="advice-title">Let's work on your {focus.area}</div>
+            <div className="advice-body">
+              Based on this round, {focus.detail}. At the range this week, focus on {focus.drill} — ready for your next round.
+            </div>
+          </div>
+        ) : (
+          <div className="advice-card" style={{ margin: "0 0 18px" }}>
+            <div className="advice-tag">Focus This Week</div>
+            <div className="advice-title">Solid round across the board</div>
+            <div className="advice-body">Nothing stood out as a clear weak spot from this one — keep doing what you're doing and keep logging rounds so I can spot patterns over time.</div>
+          </div>
+        )}
+
+        <button className="btn btn-primary" onClick={onClose}>Let's go</button>
+      </div>
+    </div>
+  );
+}
+
+
 function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile }) {
   const firstName = user.name.split(" ")[0];
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
