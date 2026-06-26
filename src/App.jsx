@@ -2593,17 +2593,21 @@ function BagScreen({ user, onUpdateUser, onBack }) {
 
 // ─── Handicap trend line chart (SVG, no library) ─────────────────────────────
 function HandicapChart({ points }) {
-  // points: [{ value, date }] sorted oldest → newest
+  // points: [{ value, date, courseName }] — one per submitted round, sorted
+  // oldest → newest. `value` is the handicap the person was PLAYING OFF on
+  // that round's date (round.handicapPlayed), not the resulting index —
+  // this is what lets the chart show round-to-round consistency rather
+  // than only "how my official index changed over time".
   if (points.length < 2) return null;
 
-  const W = 320, H = 120, padX = 14, padY = 16;
+  const W = 320, H = 140, padX = 14, padTop = 16, padBottom = 34; // extra bottom padding for date labels
   const values = points.map(p => p.value);
   const minV = Math.min(...values), maxV = Math.max(...values);
   const range = Math.max(0.5, maxV - minV); // avoid a flat-zero range
-  const yFor = (v) => H - padY - ((v - minV) / range) * (H - padY * 2);
-  const xFor = (i) => padX + (i / (points.length - 1)) * (W - padX * 2);
+  const yFor = (v) => H - padBottom - ((v - minV) / range) * (H - padTop - padBottom);
+  const xFor = (i) => points.length === 1 ? W / 2 : padX + (i / (points.length - 1)) * (W - padX * 2);
 
-  const coords = points.map((p, i) => ({ x: xFor(i), y: yFor(p.value), v: p.value }));
+  const coords = points.map((p, i) => ({ x: xFor(i), y: yFor(p.value), v: p.value, date: p.date }));
 
   // Build one path segment per consecutive pair, coloured by direction:
   // a DECREASE in handicap (improvement) is green, an INCREASE is red.
@@ -2617,12 +2621,20 @@ function HandicapChart({ points }) {
   const first = points[0], last = points[points.length - 1];
   const overallImproving = last.value <= first.value;
 
+  // Avoid crowding the x-axis with a date under every single point once
+  // there are more than ~6 rounds — show a thinned-out set of labels
+  // (first, last, and evenly spaced ones in between) while every point
+  // still gets its own marker on the line itself.
+  const maxLabels = 6;
+  const labelStep = Math.max(1, Math.ceil(points.length / maxLabels));
+  const shortDate = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
   return (
     <div className="panel" style={{ marginBottom: 18 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 14, color: C.black }}>Handicap Trend</div>
-          <div style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>{points.length} updates logged</div>
+          <div style={{ fontWeight: 800, fontSize: 14, color: C.black }}>Handicap Consistency</div>
+          <div style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>Handicap played, by round date — {points.length} round{points.length!==1?"s":""}</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div className="mono" style={{ fontWeight: 900, fontSize: 20, color: C.black }}>{last.value.toFixed(1)}</div>
@@ -2639,7 +2651,7 @@ function HandicapChart({ points }) {
 
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
         {/* baseline grid */}
-        <line x1={padX} y1={H-padY} x2={W-padX} y2={H-padY} stroke={C.line} strokeWidth="1" />
+        <line x1={padX} y1={H-padBottom} x2={W-padX} y2={H-padBottom} stroke={C.line} strokeWidth="1" />
         {/* coloured segments */}
         {segments.map((seg, i) => (
           <line key={i} x1={seg.a.x} y1={seg.a.y} x2={seg.b.x} y2={seg.b.y} stroke={seg.color} strokeWidth="2.4" strokeLinecap="round" />
@@ -2651,12 +2663,17 @@ function HandicapChart({ points }) {
             stroke={i===0 ? C.steel : (segments[i-1]?.color || C.steel)}
             strokeWidth="1.6" />
         ))}
+        {/* date labels under each (thinned-out) point */}
+        {coords.map((c, i) => {
+          const showLabel = i === 0 || i === coords.length - 1 || i % labelStep === 0;
+          if (!showLabel) return null;
+          return (
+            <text key={`d${i}`} x={c.x} y={H - 10} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={C.ash}>
+              {shortDate(c.date)}
+            </text>
+          );
+        })}
       </svg>
-
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-        <span style={{ fontSize: 9.5, color: C.ash, fontWeight: 600 }}>{new Date(first.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span>
-        <span style={{ fontSize: 9.5, color: C.ash, fontWeight: 600 }}>{new Date(last.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span>
-      </div>
 
       <div style={{ display: "flex", gap: 14, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -2698,8 +2715,10 @@ function ragColor(metric, value) {
 // Performance shows, since they're reading the exact same numbers.
 function computeGameStats(user, rounds, range = "all") {
   const filtered = range === "all" ? rounds
+    : range === "last10" ? rounds.slice(-10)
     : range === "last5" ? rounds.slice(-5)
-    : rounds.slice(-10);
+    : range === "last3" ? rounds.slice(-3)
+    : rounds;
 
   if (filtered.length === 0) return null;
 
@@ -2713,7 +2732,8 @@ function computeGameStats(user, rounds, range = "all") {
       const gross = parseInt(s?.strokes);
       if (!gross) return;
       holeStats.push({
-        courseId: r.courseId, courseName: r.courseName, n: h.n, par: h.par, si: h.si,
+        courseId: r.courseId, courseName: r.courseName, roundId: r.id, date: r.date,
+        n: h.n, par: h.par, si: h.si,
         yds: h.yds?.[tee] || h.yds?.white || null,
         net: gross - h.par, gross, putts: parseInt(s?.putts) || null,
         fir: h.par >= 4 ? s?.fir : null, gir: s?.gir ?? null, lost: parseInt(s?.lost) || 0,
@@ -2817,11 +2837,12 @@ function computeGameStats(user, rounds, range = "all") {
 
 function PerformanceScreen({ user, onBack }) {
   const rounds = LS.get(`bb_rounds_${user.id}`) || [];
-  const [range, setRange] = useState("all"); // all | last5 | last10
+  const [range, setRange] = useState("all"); // all | last10 | last5 | last3
 
   const filtered = range === "all" ? rounds
+    : range === "last10" ? rounds.slice(-10)
     : range === "last5" ? rounds.slice(-5)
-    : rounds.slice(-10);
+    : rounds.slice(-3);
 
   // ── No data state ──
   if (rounds.length === 0) {
@@ -2854,7 +2875,8 @@ function PerformanceScreen({ user, onBack }) {
       const gross = parseInt(s?.strokes);
       if (!gross) return; // unplayed / no-score hole, excluded from distribution but tracked separately
       holeStats.push({
-        courseId: r.courseId, courseName: r.courseName, n: h.n, par: h.par, si: h.si,
+        courseId: r.courseId, courseName: r.courseName, roundId: r.id, date: r.date,
+        n: h.n, par: h.par, si: h.si,
         yds: h.yds?.[tee] || h.yds?.white || null,
         net: gross - h.par, gross, putts: parseInt(s?.putts) || null,
         fir: h.par >= 4 ? s?.fir : null, gir: s?.gir ?? null, lost: parseInt(s?.lost) || 0,
@@ -2866,6 +2888,27 @@ function PerformanceScreen({ user, onBack }) {
   const totalHolesLogged = holeStats.length;
   const totalHolesPossible = filtered.reduce((s,r) => s + 18, 0);
   const noScoreHoles = totalHolesPossible - totalHolesLogged;
+
+  // ── Round-level signals, for advice that names specific rounds rather ──
+  // ── than only speaking in aggregates. `filtered` is already sorted    ──
+  // ── oldest → newest (rounds are pushed in submission order).          ──
+  const roundsWithPts = filtered.filter(r => r.totalPts != null);
+  const bestRound = roundsWithPts.length ? roundsWithPts.reduce((a,b) => (b.totalPts > a.totalPts ? b : a)) : null;
+  const worstRound = roundsWithPts.length ? roundsWithPts.reduce((a,b) => (b.totalPts < a.totalPts ? b : a)) : null;
+  const mostRecentRound = filtered.length ? filtered[filtered.length - 1] : null;
+  const fmtRoundDate = (r) => r ? new Date(r.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
+
+  // 3-putt streak: how many of the most recent rounds (within the current
+  // range) had at least one 3-putt — lets advice say "your last 3 rounds"
+  // instead of only an all-time rate.
+  const roundThreePutts = {}; // roundId -> count of 3-putt holes that round
+  holeStats.forEach(h => { if (h.putts >= 3) roundThreePutts[h.roundId] = (roundThreePutts[h.roundId] || 0) + 1; });
+  const recentRoundsForStreak = [...filtered].slice(-5).reverse(); // newest first
+  let recentThreePuttStreak = 0;
+  for (const r of recentRoundsForStreak) {
+    if (roundThreePutts[r.id]) recentThreePuttStreak++;
+    else break;
+  }
 
   // ── Score distribution ──
   const dist = { albatross:0, eagle:0, birdie:0, par:0, bogey:0, double:0, tripleplus:0 };
@@ -2960,11 +3003,24 @@ function PerformanceScreen({ user, onBack }) {
     trend = b - a;
   }
 
-  // ── Handicap history points (respects the same All/Last10/Last5 range toggle) ──
-  const allHistory = [...(user.handicapHistory || [])].sort((a,b) => new Date(a.date) - new Date(b.date));
-  const filteredHistory = range === "all" ? allHistory
-    : range === "last10" ? allHistory.slice(-10)
-    : allHistory.slice(-5);
+  // ── Handicap-played-per-round points, for the consistency chart.    ──
+  // ── `filtered` is already range-filtered (all/last10/last5/last3)   ──
+  // ── and sorted oldest → newest, so this just maps it directly.      ──
+  // Rounds submitted before handicapPlayed was tracked fall back to the
+  // same estimate RoundSummaryStrip uses (nearest known handicap from
+  // handicapHistory), so older rounds still get a point on the chart
+  // rather than silently disappearing from it.
+  const sortedHcpHistory = [...(user.handicapHistory || [])].sort((a,b) => new Date(a.date) - new Date(b.date));
+  const estimateHandicapPlayed = (round) => {
+    if (round.handicapPlayed != null) return round.handicapPlayed;
+    if (!sortedHcpHistory.length) return null;
+    const idx = sortedHcpHistory.findIndex(h => h.roundId === round.id);
+    if (idx > 0) return sortedHcpHistory[idx - 1].value;
+    return sortedHcpHistory[0].value;
+  };
+  const filteredHistory = filtered
+    .map(r => ({ value: estimateHandicapPlayed(r), date: r.date, courseName: r.courseName, roundId: r.id }))
+    .filter(p => p.value != null);
 
   // ── Bag gap analysis ──
   const bagWithYardage = (user.bag || []).filter(c => (c.summerYardage || c.yardage) && c.category !== "Putter").map(c => ({ ...c, yardage: parseInt(c.summerYardage || c.yardage) })).sort((a,b) => b.yardage - a.yardage);
@@ -2979,11 +3035,18 @@ function PerformanceScreen({ user, onBack }) {
 
   // ── Build prioritized insights (rule-based, ranked by signal strength) ──
   const insights = [];
+  if (recentThreePuttStreak >= 3) {
+    insights.push({
+      tag: "Putting", priority: 1.5 + recentThreePuttStreak * 0.1,
+      title: `3-putts in each of your last ${recentThreePuttStreak} rounds`,
+      body: `Every round since ${fmtRoundDate(recentRoundsForStreak[recentThreePuttStreak-1])} has had at least one 3-putt. That's consistent enough to be a pattern, not bad luck — spend your next range session purely on 20-40ft lag putts to a target, not short putts.`,
+    });
+  }
   if (threePuttRate >= 0.18 && puttedHoles.length >= 9) {
     insights.push({
       tag: "Putting", priority: threePuttRate,
       title: `3-putting ${Math.round(threePuttRate*100)}% of greens`,
-      body: `You've taken 3+ putts on ${threePutts} of ${puttedHoles.length} logged holes. This is usually a lag-putting / distance-control issue rather than the short stuff — focus range time on 20-40ft putts to a target, not just tap-ins.`,
+      body: `You've taken 3+ putts on ${threePutts} of ${puttedHoles.length} logged holes across ${roundsWithPts.length} round${roundsWithPts.length!==1?"s":""}. This is usually a lag-putting / distance-control issue rather than the short stuff — focus range time on 20-40ft putts to a target, not just tap-ins.`,
     });
   }
   if (avgPuttsOffGIR != null && avgPuttsGIR != null && avgPuttsOffGIR - avgPuttsGIR >= 0.5) {
@@ -2997,7 +3060,7 @@ function PerformanceScreen({ user, onBack }) {
     insights.push({
       tag: "Driving", priority: 1 - firRate,
       title: `Fairways hit: ${Math.round(firRate*100)}%`,
-      body: `Missing more than half your fairways on par 4s/5s. Before adding distance, work on a club you can find the fairway with consistently — accuracy off the tee sets up every other shot.`,
+      body: `Missing more than half your fairways on par 4s/5s across ${roundsWithPts.length} round${roundsWithPts.length!==1?"s":""}. Before adding distance, work on a club you can find the fairway with consistently — accuracy off the tee sets up every other shot.`,
     });
   }
   if (girRate != null && girRate < 0.30 && girHoles.length >= 6) {
@@ -3022,6 +3085,16 @@ function PerformanceScreen({ user, onBack }) {
       body: `Averaging +${wh.avgNet.toFixed(1)} over par on these across ${wh.plays} hole${wh.plays>1?"s":""} played. Worth a dedicated strategy session — what's actually going wrong, the tee shot or the approach?`,
     });
   }
+  if (worstRound && bestRound && worstRound.id !== bestRound.id && roundsWithPts.length >= 2) {
+    const swing = bestRound.totalPts - worstRound.totalPts;
+    if (swing >= 8) {
+      insights.push({
+        tag: "Consistency", priority: swing / 20,
+        title: `${swing}-point swing between your best and worst round`,
+        body: `Your ${fmtRoundDate(worstRound)} round at ${worstRound.courseName} (${worstRound.totalPts} pts) was a long way off your ${fmtRoundDate(bestRound)} round at ${bestRound.courseName} (${bestRound.totalPts} pts). A gap that size usually means the fundamentals are there — it's about repeating your better rounds more often, not finding new swing thoughts.`,
+      });
+    }
+  }
   if (biggestGap && biggestGap.gap >= 30) {
     insights.push({
       tag: "Equipment", priority: biggestGap.gap / 40,
@@ -3042,22 +3115,22 @@ function PerformanceScreen({ user, onBack }) {
   // ── Range tips, derived from the same signals ──
   const rangeTips = [];
   if (threePuttRate >= 0.15 || avgPutts == null) {
-    rangeTips.push({ icon: <Icon.Target />, title: "Lag putting ladder", body: "Putt to 3 different distances (15ft, 30ft, 45ft) and count how many finish within a 3ft circle. Builds real distance control." });
+    rangeTips.push({ icon: <Icon.Target />, title: "Lag putting ladder", body: "Putt to 3 different distances (15ft, 30ft, 45ft) and count how many finish within a 3ft circle. Builds real distance control.", why: `Triggered by your ${Math.round(threePuttRate*100)}% 3-putt rate.` });
   }
   if (avgPuttsOffGIR != null && avgPuttsGIR != null && avgPuttsOffGIR - avgPuttsGIR >= 0.3) {
-    rangeTips.push({ icon: <Icon.Spark />, title: "Up-and-down practice", body: "From the chipping green, play 10 balls from 30 yards. Track how many finish inside 6ft of the pin." });
+    rangeTips.push({ icon: <Icon.Spark />, title: "Up-and-down practice", body: "From the chipping green, play 10 balls from 30 yards. Track how many finish inside 6ft of the pin.", why: `Triggered by ${(avgPuttsOffGIR-avgPuttsGIR).toFixed(1)} extra putts when you miss greens.` });
   }
   if (firRate != null && firRate < 0.5) {
-    rangeTips.push({ icon: <Icon.Range />, title: "Fairway finder drill", body: "Hit 10 tee shots aiming at a target 220-250y out — score 2pts for fairway-width, 1pt for in-bounds. Track the total, not the longest." });
+    rangeTips.push({ icon: <Icon.Range />, title: "Fairway finder drill", body: "Hit 10 tee shots aiming at a target 220-250y out — score 2pts for fairway-width, 1pt for in-bounds. Track the total, not the longest.", why: `Triggered by ${Math.round(firRate*100)}% fairways hit.` });
   }
   if (girRate != null && girRate < 0.35) {
-    rangeTips.push({ icon: <Icon.Target />, title: "Yardage ladders with irons", body: "Hit 5 balls each with your 7, 8, 9 iron and note actual carry distance. Most golfers overestimate their numbers by 10-15 yards." });
+    rangeTips.push({ icon: <Icon.Target />, title: "Yardage ladders with irons", body: "Hit 5 balls each with your 7, 8, 9 iron and note actual carry distance. Most golfers overestimate their numbers by 10-15 yards.", why: `Triggered by ${Math.round(girRate*100)}% greens in regulation.` });
   }
   if (biggestGap && biggestGap.gap >= 25) {
-    rangeTips.push({ icon: <Icon.Club />, title: "Find your gap-filler", body: `Try hitting easy 80% swings with your ${biggestGap.longer.category} to see if it covers part of that ${biggestGap.gap}y gap before buying a new club.` });
+    rangeTips.push({ icon: <Icon.Club />, title: "Find your gap-filler", body: `Try hitting easy 80% swings with your ${biggestGap.longer.category} to see if it covers part of that ${biggestGap.gap}y gap before buying a new club.`, why: `Triggered by the ${biggestGap.gap}y gap in your bag.` });
   }
   if (rangeTips.length === 0) {
-    rangeTips.push({ icon: <Icon.Spark />, title: "Keep logging rounds", body: "Your fundamentals look solid across the data so far — the more rounds you log, the sharper these tips become." });
+    rangeTips.push({ icon: <Icon.Spark />, title: "Keep logging rounds", body: "Your fundamentals look solid across the data so far — the more rounds you log, the sharper these tips become.", why: null });
   }
 
   return (
@@ -3072,7 +3145,7 @@ function PerformanceScreen({ user, onBack }) {
       </div>
 
       <div className="seg-toggle" style={{ marginTop: 18 }}>
-        {[["all","All Rounds"],["last10","Last 10"],["last5","Last 5"]].map(([key,label]) => (
+        {[["all","All"],["last10","Last 10"],["last5","Last 5"],["last3","Last 3"]].map(([key,label]) => (
           <div key={key} className={`seg-toggle-btn ${range===key?"on":""}`} onClick={() => setRange(key)}>{label}</div>
         ))}
       </div>
@@ -3135,7 +3208,7 @@ function PerformanceScreen({ user, onBack }) {
       )}
 
       {/* Handicap trend */}
-      <div className="section-head"><span className="section-title">Handicap History</span></div>
+      <div className="section-head"><span className="section-title">Handicap Consistency</span></div>
       {filteredHistory.length >= 2 ? (
         <HandicapChart points={filteredHistory} />
       ) : (
@@ -3230,6 +3303,7 @@ function PerformanceScreen({ user, onBack }) {
             <div>
               <div className="range-tip-title">{tip.title}</div>
               <div className="range-tip-body">{tip.body}</div>
+              {tip.why && <div style={{ fontSize: 10.5, color: C.ash, marginTop: 6, fontWeight: 700 }}>{tip.why}</div>}
             </div>
           </div>
         ))}
