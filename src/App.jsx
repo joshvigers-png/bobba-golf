@@ -1490,6 +1490,199 @@ function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose }) {
 }
 
 
+// ─── Profile photo crop modal ─────────────────────────────────────────────────
+// Two problems solved together here:
+//  1) UX: lets the person frame their photo inside a circle rather than
+//     guessing how a rectangular photo will get auto-cropped by CSS.
+//  2) The REAL bug: raw camera photos (often 3-8MB) get base64-encoded and
+//     pushed straight into localStorage, which has a hard ~5-10MB total
+//     quota per origin. That silently throws and the save just disappears.
+//     A small logo/export (the case that "worked") is usually well under
+//     200KB, so it never hit the limit — a normal phone photo reliably
+//     does. Cropping to a small fixed output size (320x320) and exporting
+//     as compressed JPEG brings any photo down to a few KB to ~100KB
+//     regardless of the original file size, so the save can't blow the
+//     quota the way it could before.
+const CROP_OUTPUT_SIZE = 320; // final exported image is always this square size
+
+function PhotoCropModal({ file, onCancel, onSave }) {
+  const canvasRef = useRef(null);
+  const imgRef = useRef(null);
+  const containerRef = useRef(null);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [minZoom, setMinZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 }); // pan offset in display px
+  const dragState = useRef(null); // { startX, startY, startOffsetX, startOffsetY } | null
+  const pinchState = useRef(null); // { startDist, startZoom } | null
+
+  const VIEW_SIZE = 280; // on-screen crop circle/viewport size in CSS px
+
+  // Load the selected file into an <img> once, to read its natural size
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      imgRef.current = img;
+      // Minimum zoom = whatever scale makes the SHORTER side exactly fill
+      // the viewport, so the user can never zoom out far enough to leave
+      // empty space inside the circle.
+      const scale = Math.max(VIEW_SIZE / img.width, VIEW_SIZE / img.height);
+      setMinZoom(scale);
+      setZoom(scale);
+      setOffset({ x: 0, y: 0 });
+      setImgLoaded(true);
+    };
+    img.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  // Clamp panning so the image can never be dragged far enough to show
+  // empty space inside the circular viewport, given the current zoom.
+  const clampOffset = (off, z) => {
+    if (!imgRef.current) return off;
+    const dispW = imgRef.current.width * z;
+    const dispH = imgRef.current.height * z;
+    const maxX = Math.max(0, (dispW - VIEW_SIZE) / 2);
+    const maxY = Math.max(0, (dispH - VIEW_SIZE) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, off.x)), y: Math.min(maxY, Math.max(-maxY, off.y)) };
+  };
+
+  const handlePointerDown = (e) => {
+    const point = e.touches ? e.touches[0] : e;
+    dragState.current = { startX: point.clientX, startY: point.clientY, startOffsetX: offset.x, startOffsetY: offset.y };
+  };
+  const handlePointerMove = (e) => {
+    if (e.touches && e.touches.length === 2) {
+      // Pinch-to-zoom
+      const [a, b] = e.touches;
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      if (!pinchState.current) {
+        pinchState.current = { startDist: dist, startZoom: zoom };
+      } else {
+        const ratio = dist / pinchState.current.startDist;
+        const newZoom = Math.min(minZoom * 4, Math.max(minZoom, pinchState.current.startZoom * ratio));
+        setZoom(newZoom);
+        setOffset(prev => clampOffset(prev, newZoom));
+      }
+      return;
+    }
+    if (!dragState.current) return;
+    const point = e.touches ? e.touches[0] : e;
+    const dx = point.clientX - dragState.current.startX;
+    const dy = point.clientY - dragState.current.startY;
+    setOffset(clampOffset({ x: dragState.current.startOffsetX + dx, y: dragState.current.startOffsetY + dy }, zoom));
+  };
+  const handlePointerUp = () => { dragState.current = null; pinchState.current = null; };
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0015;
+    const newZoom = Math.min(minZoom * 4, Math.max(minZoom, zoom + zoom * delta));
+    setZoom(newZoom);
+    setOffset(prev => clampOffset(prev, newZoom));
+  };
+
+  const handleZoomSlider = (val) => {
+    const newZoom = parseFloat(val);
+    setZoom(newZoom);
+    setOffset(prev => clampOffset(prev, newZoom));
+  };
+
+  const confirmCrop = () => {
+    const img = imgRef.current;
+    if (!img) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = CROP_OUTPUT_SIZE;
+    canvas.height = CROP_OUTPUT_SIZE;
+    const ctx = canvas.getContext("2d");
+    // Circular clip so corners outside the circle are transparent (though
+    // we flatten to JPEG below, so in practice this just guarantees a clean
+    // circular edge with no stray rectangular content peeking through if
+    // the displayed CSS circle and the exported square don't align exactly).
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(CROP_OUTPUT_SIZE / 2, CROP_OUTPUT_SIZE / 2, CROP_OUTPUT_SIZE / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    // Fill background white first (JPEG has no transparency — without this,
+    // anti-aliased circle edges would composite onto black)
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, CROP_OUTPUT_SIZE, CROP_OUTPUT_SIZE);
+
+    const outputScale = CROP_OUTPUT_SIZE / VIEW_SIZE;
+    const dispW = img.width * zoom * outputScale;
+    const dispH = img.height * zoom * outputScale;
+    const dx = CROP_OUTPUT_SIZE / 2 - dispW / 2 + offset.x * outputScale;
+    const dy = CROP_OUTPUT_SIZE / 2 - dispH / 2 + offset.y * outputScale;
+    ctx.drawImage(img, dx, dy, dispW, dispH);
+    ctx.restore();
+
+    // Compressed JPEG keeps the final data URL small (typically well under
+    // 100KB even for a busy photo) regardless of how large the original
+    // camera file was — this is what actually fixes the silent save failure.
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    onSave(dataUrl);
+  };
+
+  return (
+    <div className="sheet-overlay" onClick={onCancel}>
+      <div className="sheet" onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+        <div className="sheet-handle" />
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 6 }}>Adjust Photo</div>
+        <p style={{ fontSize: 12, color: C.steel, marginBottom: 18 }}>Drag to reposition, pinch or scroll to zoom</p>
+
+        <div
+          ref={containerRef}
+          style={{
+            position: "relative", width: VIEW_SIZE, height: VIEW_SIZE, margin: "0 auto 18px",
+            borderRadius: "50%", overflow: "hidden", background: C.cloud, cursor: "grab",
+            touchAction: "none", boxShadow: `0 0 0 3px ${C.white}, 0 0 0 4px ${C.line}`,
+          }}
+          onMouseDown={handlePointerDown}
+          onMouseMove={handlePointerMove}
+          onMouseUp={handlePointerUp}
+          onMouseLeave={handlePointerUp}
+          onTouchStart={handlePointerDown}
+          onTouchMove={handlePointerMove}
+          onTouchEnd={handlePointerUp}
+          onWheel={handleWheel}
+        >
+          {imgLoaded && imgRef.current && (
+            <img
+              src={imgRef.current.src}
+              alt=""
+              draggable={false}
+              style={{
+                position: "absolute", left: "50%", top: "50%",
+                width: imgRef.current.width * zoom, height: imgRef.current.height * zoom,
+                transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)`,
+                pointerEvents: "none", userSelect: "none",
+              }}
+            />
+          )}
+        </div>
+
+        {imgLoaded && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 4px 22px" }}>
+            <div style={{ width: 14, height: 14, color: C.steel, flexShrink: 0 }}><Icon.Search /></div>
+            <input
+              type="range" min={minZoom} max={minZoom * 4} step={(minZoom * 3) / 100}
+              value={zoom} onChange={e => handleZoomSlider(e.target.value)}
+              style={{ flex: 1 }}
+            />
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn-outline" onClick={onCancel} style={{ flex: 1 }}>Cancel</button>
+          <button className="btn btn-primary" onClick={confirmCrop} style={{ flex: 1 }} disabled={!imgLoaded}>Save Photo</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile }) {
   const firstName = user.name.split(" ")[0];
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
@@ -1628,14 +1821,31 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
     setEditing(false);
   };
 
+  const [cropFile, setCropFile] = useState(null); // File pending crop, or null
+  const [photoError, setPhotoError] = useState("");
+
   const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      onUpdate({ ...user, photo: reader.result });
-    };
-    reader.readAsDataURL(file);
+    setPhotoError("");
+    setCropFile(file);
+    // Reset the input value so selecting the SAME file again later (e.g.
+    // after cancelling the crop) still fires onChange — browsers otherwise
+    // treat an unchanged file input value as "no change".
+    e.target.value = "";
+  };
+
+  const handleCroppedPhoto = (dataUrl) => {
+    try {
+      onUpdate({ ...user, photo: dataUrl });
+      setCropFile(null);
+    } catch (err) {
+      // Belt-and-braces: even a compressed ~320px JPEG could theoretically
+      // still tip a very full localStorage over its quota. Surface that
+      // clearly instead of letting it fail silently like before.
+      setPhotoError("Couldn't save your photo — your device's local storage may be full. Try freeing up space or use a smaller photo.");
+      setCropFile(null);
+    }
   };
 
   return (
@@ -1657,6 +1867,9 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
             <Icon.Edit />
           </button>
         </div>
+        {photoError && (
+          <p style={{ fontSize: 11.5, color: C.red, marginTop: -6, marginBottom: 14, lineHeight: 1.5 }}>{photoError}</p>
+        )}
 
         {editing ? (
           <div style={{ textAlign: "left" }}>
@@ -1806,6 +2019,14 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
             <button className="btn btn-outline" onClick={() => { setDeleteOpen(false); setConfirmText(""); }}>Cancel</button>
           </div>
         </div>
+      )}
+
+      {cropFile && (
+        <PhotoCropModal
+          file={cropFile}
+          onCancel={() => setCropFile(null)}
+          onSave={handleCroppedPhoto}
+        />
       )}
     </div>
   );
