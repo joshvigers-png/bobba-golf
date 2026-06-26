@@ -1559,7 +1559,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
               </div>
               <div style={{ width: 1, background: C.line }} />
               <div style={{ textAlign: "center" }}>
-                <div className="mono" style={{ fontSize: 24, fontWeight: 800, color: C.black }}>0</div>
+                <div className="mono" style={{ fontSize: 24, fontWeight: 800, color: C.black }}>{(LS.get(`bb_rounds_${user.id}`) || []).length}</div>
                 <div style={{ fontSize: 9.5, color: C.steel, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", marginTop: 3 }}>Rounds</div>
               </div>
             </div>
@@ -1598,13 +1598,6 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
           <span style={{ fontSize: 13.5, fontWeight: 600, color: C.red }}>Delete Account</span>
           <div style={{ width: 15, height: 15, color: C.red }}><Icon.ChevronRight /></div>
         </div>
-      </div>
-
-      <div style={{ padding: "8px 18px 4px" }}>
-        <button onClick={onLogout} style={{ background: "none", border: "none", color: C.red, fontSize: 12, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: "10px 0" }}>
-          <div style={{ width: 14, height: 14 }}><Icon.Logout /></div>
-          Sign Out
-        </button>
       </div>
 
       {deleteOpen && (
@@ -1834,6 +1827,9 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     const record = {
       id: Date.now(),
       courseId: course.id, courseName: course.name, tee: teeKey,
+      course, // full snapshot (holes, pars, stroke indices, yardages, tees) so this
+              // round can always be re-displayed later, even if the source course
+              // was fetched live from the API and never lived in COURSE_DB
       date: setup.date, conditions: setup.conditions,
       scores, totalGross, totalPts, totalPutts, totalLost, holesPlayed,
       rating: teeInfo?.rating, slope: teeInfo?.slope, differential: diff,
@@ -2128,10 +2124,27 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
 
 // ─── Round Review / Edit (after submission) ──────────────────────────────────
 function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
-  const course = COURSE_DB.find(c => c.id === round.courseId);
+  const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
   const [scores, setScores] = useState(round.scores);
   const [dirty, setDirty] = useState(false);
-  if (!course) return null;
+  if (!course) {
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh" }}>
+        <div className="page-head">
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div className="page-head-eyebrow">Editing Round</div>
+          <h1 style={{ fontSize: 22 }}>{round.courseName || "Round"}</h1>
+        </div>
+        <div className="empty">
+          <div className="empty-icon"><Icon.Flag /></div>
+          <div className="empty-title">Course data unavailable</div>
+          <div className="empty-sub">This round was saved before course details were stored with it, so it can't be edited hole-by-hole. Your scores are still safe and counted in your history and handicap.</div>
+        </div>
+      </div>
+    );
+  }
   const teeKey = round.tee;
   const teeInfo = course.tees[teeKey];
 
@@ -2673,7 +2686,7 @@ function computeGameStats(user, rounds, range = "all") {
 
   const holeStats = [];
   filtered.forEach(r => {
-    const course = COURSE_DB.find(c => c.id === r.courseId);
+    const course = r.course || COURSE_DB.find(c => c.id === r.courseId);
     if (!course) return;
     const tee = r.tee || "white";
     course.holes.forEach(h => {
@@ -2728,7 +2741,8 @@ function computeGameStats(user, rounds, range = "all") {
   const avgScore = filtered.length ? (filtered.reduce((s,r)=>s+(r.totalGross||0),0) / filtered.length) : 0;
   const avgPts = filtered.length ? (filtered.reduce((s,r)=>s+(r.totalPts||0),0) / filtered.length) : 0;
   const avgParPlayed = filtered.length ? (filtered.reduce((s,r) => {
-    const c = COURSE_DB.find(cc => cc.id === r.courseId);
+    if (r.coursePar != null) return s + r.coursePar;
+    const c = r.course || COURSE_DB.find(cc => cc.id === r.courseId);
     return s + (c ? c.holes.reduce((ps,h)=>ps+h.par,0) : 72);
   }, 0) / filtered.length) : 72;
   const avgOverPar = avgScore - avgParPlayed;
@@ -2813,7 +2827,7 @@ function PerformanceScreen({ user, onBack }) {
   // ── Walk every hole of every round, classify against par ──
   const holeStats = []; // { courseId, n, par, si, net, gross, putts, fir, gir, lost, isPar45 }
   filtered.forEach(r => {
-    const course = COURSE_DB.find(c => c.id === r.courseId);
+    const course = r.course || COURSE_DB.find(c => c.id === r.courseId);
     if (!course) return;
     const tee = r.tee || "white";
     course.holes.forEach(h => {
@@ -2892,7 +2906,8 @@ function PerformanceScreen({ user, onBack }) {
   const avgScore = filtered.length ? (filtered.reduce((s,r)=>s+(r.totalGross||0),0) / filtered.length) : 0;
   const avgPts = filtered.length ? (filtered.reduce((s,r)=>s+(r.totalPts||0),0) / filtered.length) : 0;
   const avgParPlayed = filtered.length ? (filtered.reduce((s,r) => {
-    const c = COURSE_DB.find(cc => cc.id === r.courseId);
+    if (r.coursePar != null) return s + r.coursePar;
+    const c = r.course || COURSE_DB.find(cc => cc.id === r.courseId);
     return s + (c ? c.holes.reduce((ps,h)=>ps+h.par,0) : 72);
   }, 0) / filtered.length) : 72;
   const avgOverPar = avgScore - avgParPlayed;
@@ -3665,7 +3680,7 @@ function NewPlayPostSheet({ user, onClose }) {
 
 // ─── Shared: condensed round summary strip (Course Par, Strokes, Points, +/-, HCP) ──
 function RoundSummaryStrip({ round, user }) {
-  const course = COURSE_DB.find(c => c.id === round.courseId);
+  const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
   const coursePar = round.coursePar ?? (course ? course.holes.reduce((s,h)=>s+h.par,0) : null);
   const toPar = coursePar != null && round.totalGross ? round.totalGross - coursePar : null;
 
