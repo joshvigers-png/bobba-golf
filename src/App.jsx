@@ -2443,7 +2443,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
             <div className="hole-num-badge">{h.n}</div>
             <div className="hole-meta">Par <b>{h.par}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
           </div>
-          <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
+          <div className="hole-pts-badge" style={{ background: holePtsColor(pts), color: holePtsTextColor(pts) }}>{pts != null ? pts : "–"}</div>
         </div>
         <div className="hole-field-grid">
           <div>
@@ -2651,7 +2651,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
             <div className="hole-num-badge">{h.n}</div>
             <div className="hole-meta">Par <b>{h.par}</b>{h.yds[teeKey] ? <> · <b>{h.yds[teeKey]}</b>y</> : ""}</div>
           </div>
-          <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
+          <div className="hole-pts-badge" style={{ background: holePtsColor(pts), color: holePtsTextColor(pts) }}>{pts != null ? pts : "–"}</div>
         </div>
         <div className="hole-field-grid">
           <div>
@@ -3148,6 +3148,26 @@ function HandicapChart({ points }) {
 // ─── Performance ──────────────────────────────────────────────────────────────
 // ─── RAG (Red/Amber/Green) colour helper for performance stat tiles ──────────
 const RAG = { green: "#1B7A3D", amber: "#E08A1E", red: "#C8392D" };
+// RAG background colour for a single hole's Stableford points badge, used on
+// the live scorecard and when editing a past round: 0 pts = red, 1 pt =
+// amber, 2+ pts = green — a bold filled background (like the dot legend
+// used elsewhere), with the number itself staying black. Returns the
+// neutral default badge background before any score has been entered for
+// that hole (pts is null), so an unplayed hole doesn't show as red.
+function holePtsColor(pts) {
+  if (pts == null) return C.cloud;
+  if (pts <= 0) return RAG.red;
+  if (pts === 1) return RAG.amber;
+  return RAG.green;
+}
+// Companion to holePtsColor: white text once a real RAG background is
+// showing, black text for the neutral "no score yet" default badge.
+// White is used uniformly across green/amber/red for visual consistency,
+// even though amber technically reads better with dark text — a
+// deliberate simplicity-over-contrast choice.
+function holePtsTextColor(pts) {
+  return pts == null ? C.black : C.white;
+}
 function ragColor(metric, value) {
   if (value == null) return C.steel;
   switch (metric) {
