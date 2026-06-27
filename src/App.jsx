@@ -2989,13 +2989,18 @@ function BagScreen({ user, onUpdateUser, onBack }) {
 // ─── Handicap trend line chart (SVG, no library) ─────────────────────────────
 function HandicapChart({ points }) {
   // points: [{ value, date, courseName }] — one per submitted round, sorted
-  // oldest → newest. `value` is the handicap the person was PLAYING OFF on
-  // that round's date (round.handicapPlayed), not the resulting index —
-  // this is what lets the chart show round-to-round consistency rather
-  // than only "how my official index changed over time".
+  // oldest → newest BY ROUND DATE (the caller sorts by date explicitly,
+  // since submission order and the actual date played aren't always the
+  // same thing if a round gets logged into the app after the fact).
+  // `value` is the handicap the person was PLAYING OFF on that round's
+  // date (round.handicapPlayed), not the resulting index — this is what
+  // lets the chart show round-to-round consistency rather than only "how
+  // my official index changed over time".
   if (points.length < 2) return null;
 
-  const W = 320, H = 140, padX = 14, padTop = 16, padBottom = 34; // extra bottom padding for date labels
+  // Taller canvas than before, with extra top/bottom room specifically to
+  // fit the handicap value printed directly above/below each point.
+  const W = 320, H = 180, padX = 18, padTop = 30, padBottom = 46;
   const values = points.map(p => p.value);
   const minV = Math.min(...values), maxV = Math.max(...values);
   const range = Math.max(0.5, maxV - minV); // avoid a flat-zero range
@@ -3019,10 +3024,23 @@ function HandicapChart({ points }) {
   // Avoid crowding the x-axis with a date under every single point once
   // there are more than ~6 rounds — show a thinned-out set of labels
   // (first, last, and evenly spaced ones in between) while every point
-  // still gets its own marker on the line itself.
+  // still gets its own marker AND its own value label on the line itself.
   const maxLabels = 6;
   const labelStep = Math.max(1, Math.ceil(points.length / maxLabels));
   const shortDate = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
+  // Decide whether each point's value label sits above or below the dot:
+  // a "peak" (higher than both neighbours, or the highest point overall)
+  // gets its label above; a "trough" gets it below; this keeps the number
+  // from colliding with the line itself as it rises and falls.
+  const labelAbove = coords.map((c, i) => {
+    const prev = coords[i - 1], next = coords[i + 1];
+    if (!prev) return next ? c.v >= next.v : true; // first point: above unless the line immediately rises
+    if (!next) return c.v >= prev.v; // last point: above if the line was rising into it
+    // Local peak (higher value = lower y, since SVG y grows downward) → label above.
+    // Local trough → label below. A straight run defaults to above.
+    return c.v >= prev.v || c.v >= next.v;
+  });
 
   return (
     <div className="panel" style={{ marginBottom: 18 }}>
@@ -3057,6 +3075,15 @@ function HandicapChart({ points }) {
             fill={i===coords.length-1 ? C.black : C.white}
             stroke={i===0 ? C.steel : (segments[i-1]?.color || C.steel)}
             strokeWidth="1.6" />
+        ))}
+        {/* handicap value printed at every point — above on a peak, below on a trough */}
+        {coords.map((c, i) => (
+          <text
+            key={`v${i}`} x={c.x} y={labelAbove[i] ? c.y - 9 : c.y + 15}
+            textAnchor="middle" fontSize="10" fontWeight="800" fill={C.black}
+          >
+            {c.v.toFixed(1)}
+          </text>
         ))}
         {/* date labels under each (thinned-out) point */}
         {coords.map((c, i) => {
@@ -3399,8 +3426,9 @@ function PerformanceScreen({ user, onBack }) {
   }
 
   // ── Handicap-played-per-round points, for the consistency chart.    ──
-  // ── `filtered` is already range-filtered (all/last10/last5/last3)   ──
-  // ── and sorted oldest → newest, so this just maps it directly.      ──
+  // ── Sorted explicitly by ROUND DATE (not array/submission order) —   ──
+  // ── a round can be logged into the app after the fact, so submission ──
+  // ── order and the actual date played aren't always the same thing.   ──
   // Rounds submitted before handicapPlayed was tracked fall back to the
   // same estimate RoundSummaryStrip uses (nearest known handicap from
   // handicapHistory), so older rounds still get a point on the chart
@@ -3413,7 +3441,8 @@ function PerformanceScreen({ user, onBack }) {
     if (idx > 0) return sortedHcpHistory[idx - 1].value;
     return sortedHcpHistory[0].value;
   };
-  const filteredHistory = filtered
+  const filteredHistory = [...filtered]
+    .sort((a,b) => new Date(a.date) - new Date(b.date))
     .map(r => ({ value: estimateHandicapPlayed(r), date: r.date, courseName: r.courseName, roundId: r.id }))
     .filter(p => p.value != null);
 
@@ -3561,8 +3590,8 @@ function PerformanceScreen({ user, onBack }) {
           <div className="perf-stat-lbl">Avg Putts / Round</div>
         </div>
         <div className="perf-stat-card">
-          <div className="perf-stat-val mono" style={{ color: RAG.red }}>{lostPerRound.toFixed(1)}</div>
-          <div className="perf-stat-lbl">Lost Balls / Round</div>
+          <div className="perf-stat-val mono" style={{ color: lostPerRound >= 1.5 ? RAG.red : lostPerRound >= 0.75 ? RAG.amber : RAG.green }}>{totalLost}</div>
+          <div className="perf-stat-lbl">Lost Balls{filtered.length > 1 ? ` (${filtered.length} rounds)` : ""}</div>
         </div>
         <div className="perf-stat-card">
           <div className="perf-stat-val mono" style={{ color: ragColor("fir", firRate) }}>{firRate != null ? `${Math.round(firRate*100)}%` : "—"}</div>
