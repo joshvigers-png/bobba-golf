@@ -2218,7 +2218,8 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const totalGross = course ? course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0) : 0;
   const totalPts = course ? course.holes.reduce((s,h)=>{
     const st = parseInt(scores[h.n]?.strokes);
-    const p = st ? stablefordPts(st, h.par, user.handicap || 0, h.si) : 0;
+    const effectiveSi = scores[h.n]?.si ?? h.si;
+    const p = st ? stablefordPts(st, h.par, user.handicap || 0, effectiveSi) : 0;
     return s + (p||0);
   },0) : 0;
   const totalPutts = course ? course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.putts)||0),0) : 0;
@@ -2230,7 +2231,8 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     const gross = holesSubset.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0);
     const pts = holesSubset.reduce((s,h)=>{
       const st = parseInt(scores[h.n]?.strokes);
-      const p = st ? stablefordPts(st, h.par, user.handicap || 0, h.si) : 0;
+      const effectiveSi = scores[h.n]?.si ?? h.si;
+      const p = st ? stablefordPts(st, h.par, user.handicap || 0, effectiveSi) : 0;
       return s + (p||0);
     },0);
     return { played, gross, pts };
@@ -2423,7 +2425,15 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const HoleRow = ({ h }) => {
     const s = scores[h.n] || {};
     const gross = parseInt(s.strokes);
-    const pts = gross ? stablefordPts(gross, h.par, user.handicap || 0, h.si) : null;
+    // displaySi: what the stepper shows — blank until the person has
+    // explicitly entered a value for THIS hole, regardless of whatever the
+    // course data (real or fake-fallback) might already contain.
+    const displaySi = s.si;
+    // effectiveSi: what's actually used for the Stableford calculation —
+    // falls back to the course's stored SI so points still compute
+    // sensibly even before the person has corrected it.
+    const effectiveSi = s.si ?? h.si;
+    const pts = gross ? stablefordPts(gross, h.par, user.handicap || 0, effectiveSi) : null;
     const isPar45 = h.par >= 4;
     const done = !!gross;
     return (
@@ -2436,6 +2446,14 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
         </div>
         <div className="hole-field-grid">
+          <div>
+            <label className="hole-field-label">Stroke Index</label>
+            <div className="stepper">
+              <button className="stepper-btn" onClick={() => updateHole(h.n, "si", Math.max(1,(displaySi||1)-1))}><Icon.Minus /></button>
+              <div className="stepper-val">{displaySi ?? "–"}</div>
+              <button className="stepper-btn" onClick={() => updateHole(h.n, "si", Math.min(18,(displaySi||0)+1))}><Icon.Plus /></button>
+            </div>
+          </div>
           <div>
             <label className="hole-field-label">Strokes</label>
             <div className="stepper">
@@ -2574,7 +2592,8 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   const totalGross = course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0);
   const totalPts = course.holes.reduce((s,h)=>{
     const st = parseInt(scores[h.n]?.strokes);
-    const p = st ? stablefordPts(st, h.par, user.handicap || 0, h.si) : 0;
+    const effectiveSi = scores[h.n]?.si ?? h.si;
+    const p = st ? stablefordPts(st, h.par, user.handicap || 0, effectiveSi) : 0;
     return s + (p||0);
   },0);
   const totalPutts = course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.putts)||0),0);
@@ -2586,7 +2605,8 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
     const gross = holesSubset.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0);
     const pts = holesSubset.reduce((s,h)=>{
       const st = parseInt(scores[h.n]?.strokes);
-      const p = st ? stablefordPts(st, h.par, user.handicap || 0, h.si) : 0;
+      const effectiveSi = scores[h.n]?.si ?? h.si;
+      const p = st ? stablefordPts(st, h.par, user.handicap || 0, effectiveSi) : 0;
       return s + (p||0);
     },0);
     return { played, gross, pts };
@@ -2620,7 +2640,9 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   const HoleRow = ({ h }) => {
     const s = scores[h.n] || {};
     const gross = parseInt(s.strokes);
-    const pts = gross ? stablefordPts(gross, h.par, user.handicap || 0, h.si) : null;
+    const displaySi = s.si;
+    const effectiveSi = s.si ?? h.si;
+    const pts = gross ? stablefordPts(gross, h.par, user.handicap || 0, effectiveSi) : null;
     const isPar45 = h.par >= 4;
     return (
       <div className={`hole-row ${gross?"done":""}`}>
@@ -2632,6 +2654,14 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
           <div className="hole-pts-badge">{pts != null ? pts : "–"}</div>
         </div>
         <div className="hole-field-grid">
+          <div>
+            <label className="hole-field-label">Stroke Index</label>
+            <div className="stepper">
+              <button className="stepper-btn" onClick={() => updateHole(h.n, "si", Math.max(1,(displaySi||1)-1))}><Icon.Minus /></button>
+              <div className="stepper-val">{displaySi ?? "–"}</div>
+              <button className="stepper-btn" onClick={() => updateHole(h.n, "si", Math.min(18,(displaySi||0)+1))}><Icon.Plus /></button>
+            </div>
+          </div>
           <div>
             <label className="hole-field-label">Strokes</label>
             <div className="stepper">
@@ -3164,7 +3194,7 @@ function computeGameStats(user, rounds, range = "all") {
       if (!gross) return;
       holeStats.push({
         courseId: r.courseId, courseName: r.courseName, roundId: r.id, date: r.date,
-        n: h.n, par: h.par, si: h.si,
+        n: h.n, par: h.par, si: s?.si ?? h.si,
         yds: h.yds?.[tee] || h.yds?.white || null,
         net: gross - h.par, gross, putts: parseInt(s?.putts) || null,
         fir: h.par >= 4 ? s?.fir : null, gir: s?.gir ?? null, lost: parseInt(s?.lost) || 0,
@@ -3311,7 +3341,7 @@ function PerformanceScreen({ user, onBack }) {
       if (!gross) return; // unplayed / no-score hole, excluded from distribution but tracked separately
       holeStats.push({
         courseId: r.courseId, courseName: r.courseName, roundId: r.id, date: r.date,
-        n: h.n, par: h.par, si: h.si,
+        n: h.n, par: h.par, si: s?.si ?? h.si,
         yds: h.yds?.[tee] || h.yds?.white || null,
         net: gross - h.par, gross, putts: parseInt(s?.putts) || null,
         fir: h.par >= 4 ? s?.fir : null, gir: s?.gir ?? null, lost: parseInt(s?.lost) || 0,
