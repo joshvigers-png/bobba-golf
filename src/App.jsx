@@ -1155,8 +1155,12 @@ export default function App() {
       setBriefing({ briefing: null, hasNoRounds: true });
       return;
     }
-    const lastRound = rounds[rounds.length - 1];
-    setBriefing({ briefing: buildLastRoundBriefing(user, lastRound), hasNoRounds: false });
+    // Pick by the round's actual DATE PLAYED, not by array/submission order —
+    // a round can be logged into the app after the fact (e.g. submitting a
+    // 1 June round after already having a 25 June one logged), so the most
+    // recently ADDED round isn't necessarily the most recently PLAYED one.
+    const mostRecentByDate = [...rounds].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    setBriefing({ briefing: buildLastRoundBriefing(user, mostRecentByDate), hasNoRounds: false });
   }, [user?.id]);
 
   const updateUser = (u) => {
@@ -3136,11 +3140,16 @@ function ragColor(metric, value) {
 // Centralising this means the advice given in Goals always agrees with what
 // Performance shows, since they're reading the exact same numbers.
 function computeGameStats(user, rounds, range = "all") {
-  const filtered = range === "all" ? rounds
-    : range === "last10" ? rounds.slice(-10)
-    : range === "last5" ? rounds.slice(-5)
-    : range === "last3" ? rounds.slice(-3)
-    : rounds;
+  // Sort by date PLAYED before filtering — slice(-N) below only means
+  // "most recent N rounds" if the array is actually in chronological
+  // order, which submission order alone doesn't guarantee (a round can be
+  // logged into the app after the fact).
+  const chronological = [...rounds].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const filtered = range === "all" ? chronological
+    : range === "last10" ? chronological.slice(-10)
+    : range === "last5" ? chronological.slice(-5)
+    : range === "last3" ? chronological.slice(-3)
+    : chronological;
 
   if (filtered.length === 0) return null;
 
@@ -3258,7 +3267,11 @@ function computeGameStats(user, rounds, range = "all") {
 }
 
 function PerformanceScreen({ user, onBack }) {
-  const rounds = LS.get(`bb_rounds_${user.id}`) || [];
+  const rawRounds = LS.get(`bb_rounds_${user.id}`) || [];
+  // Sort by date PLAYED, not submission order — same reasoning as
+  // computeGameStats below: a round can be logged into the app after the
+  // fact, so array order alone doesn't reliably mean chronological order.
+  const rounds = [...rawRounds].sort((a, b) => new Date(a.date) - new Date(b.date));
   const [range, setRange] = useState("all"); // all | last10 | last5 | last3
 
   const filtered = range === "all" ? rounds
