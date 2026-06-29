@@ -1345,6 +1345,7 @@ export default function App() {
             briefing={briefing.briefing}
             hasNoRounds={briefing.hasNoRounds}
             onClose={() => setBriefing(null)}
+            onOpenBag={() => { setBriefing(null); setModulePage("bag"); }}
           />
         )}
       </div>
@@ -1417,14 +1418,38 @@ function buildLastRoundBriefing(user, round) {
 }
 
 // ─── Login welcome-back modal ────────────────────────────────────────────────
-function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose }) {
+function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose, onOpenBag }) {
   const firstName = user.name.split(" ")[0];
+
+  // Same definition of "bag has usable data" used elsewhere (Performance,
+  // Goals & Training) — a real club, excluding the putter, with a yardage
+  // entered. Shown above the round details since it's the action item.
+  const bagWithYardage = (user.bag || []).filter(c => (c.summerYardage || c.yardage) && c.category !== "Putter");
+  const bagNeedsSetup = bagWithYardage.length === 0;
+  const BagPrompt = () => (
+    <button
+      onClick={onOpenBag}
+      style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%", textAlign: "left", background: C.cloud, border: "none", borderRadius: 1, padding: "12px 14px", marginBottom: 18, cursor: "pointer" }}
+    >
+      <div style={{ width: 26, height: 26, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+        <div style={{ width: 12, height: 12, color: C.white }}><Icon.ModBag /></div>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: C.black }}>Set up The Bag</div>
+        <div style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.5, marginTop: 2 }}>
+          Add your clubs and yardages so I can give you better advice and help you reach your goals.
+        </div>
+      </div>
+      <div style={{ width: 14, height: 14, color: C.ash, flexShrink: 0, marginTop: 2 }}><Icon.ChevronRight /></div>
+    </button>
+  );
 
   if (hasNoRounds) {
     return (
       <div className="sheet-overlay" onClick={onClose}>
         <div className="sheet" onClick={e => e.stopPropagation()}>
           <div className="sheet-handle" />
+          {bagNeedsSetup && <BagPrompt />}
           <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
             <div style={{ width: 20, height: 20, color: C.black }}><Icon.ModRound /></div>
           </div>
@@ -1447,6 +1472,7 @@ function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose }) {
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
+        {bagNeedsSetup && <BagPrompt />}
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Hi, {firstName}</div>
         <p style={{ fontSize: 12, color: C.steel, marginBottom: 18 }}>Your round at {courseName} on {dateLabel}</p>
 
@@ -1700,6 +1726,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const rounds = LS.get(`bb_rounds_${user.id}`) || [];
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const modules = [
     { id: "scorecards",  label: "Play a Round", sub: "Live scoring", icon: <Icon.ModRound />, ready: true },
@@ -1722,7 +1749,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
             <h1>{firstName}</h1>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button style={{ background: C.white, border: `1.5px solid ${C.line}`, width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.black, cursor: "pointer" }}>
+            <button onClick={() => setNotificationsOpen(true)} style={{ background: C.white, border: `1.5px solid ${C.line}`, width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.black, cursor: "pointer" }}>
               <div style={{ width: 18, height: 18 }}><Icon.Bell /></div>
             </button>
             <button onClick={onOpenProfile} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", borderRadius: "50%" }}>
@@ -1778,6 +1805,22 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
           </div>
         ))}
       </div>
+
+      {notificationsOpen && (
+        <div className="sheet-overlay" onClick={() => setNotificationsOpen(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+            <div className="sheet-handle" />
+            <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <div style={{ width: 20, height: 20, color: C.black }}><Icon.Bell /></div>
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Notifications</div>
+            <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+              Notifications are still under development. Check back soon — for now, your last-round summary and tips show up right here on Home each time you log in.
+            </p>
+            <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>Got it</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
