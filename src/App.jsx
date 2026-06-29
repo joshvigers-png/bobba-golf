@@ -1421,11 +1421,12 @@ function buildLastRoundBriefing(user, round) {
 function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose, onOpenBag }) {
   const firstName = user.name.split(" ")[0];
 
-  // Same definition of "bag has usable data" used elsewhere (Performance,
-  // Goals & Training) — a real club, excluding the putter, with a yardage
-  // entered. Shown above the round details since it's the action item.
-  const bagWithYardage = (user.bag || []).filter(c => (c.summerYardage || c.yardage) && c.category !== "Putter");
-  const bagNeedsSetup = bagWithYardage.length === 0;
+  // The user decides when their bag is "done" via the Complete Bag button
+  // in The Bag screen — a single club was never a meaningful bar (legally
+  // up to 14 clubs are allowed, and most golfers carry far more than one),
+  // so this keeps prompting until they explicitly say they're finished,
+  // regardless of how many clubs that turns out to be for them.
+  const bagNeedsSetup = !user.bagCompleted;
   const BagPrompt = () => (
     <button
       onClick={onOpenBag}
@@ -2890,7 +2891,11 @@ function BagScreen({ user, onUpdateUser, onBack }) {
 
   const persist = (nextClubs, nextBalls) => {
     setClubs(nextClubs);
-    onUpdateUser({ ...user, bag: nextClubs, ballModel: nextBalls !== undefined ? nextBalls : balls });
+    // Any change to the club list invalidates a previous "complete"
+    // confirmation — the bag the person confirmed is no longer the bag
+    // that exists, so they need to re-confirm rather than the button
+    // silently staying hidden forever after the first edit.
+    onUpdateUser({ ...user, bag: nextClubs, ballModel: nextBalls !== undefined ? nextBalls : balls, bagCompleted: false });
   };
 
   const openAdd = () => { setEditingClub(null); setForm({ category: "Iron", make: "", model: "", loft: "", number: "", wedgeType: "PW", summerYardage: "", winterYardage: "" }); setSheetOpen(true); };
@@ -2928,7 +2933,23 @@ function BagScreen({ user, onUpdateUser, onBack }) {
     onUpdateUser({ ...user, bag: clubs, ballModel: val });
   };
 
-  const sortedClubs = [...clubs].sort((a,b) => CLUB_CATEGORIES.indexOf(a.category) - CLUB_CATEGORIES.indexOf(b.category));
+  // Sort by category first (Driver, Wood, Hybrid, Iron, Wedge, Putter), then
+  // by club number within categories that have one (so a 6-iron added after
+  // a 5 and 7-iron lands correctly between them, not at the end of the
+  // group based on when it happened to be added), then by wedge type order
+  // (PW -> GW -> SW -> LW, lowest loft to highest) for wedges specifically.
+  const sortedClubs = [...clubs].sort((a,b) => {
+    const catDiff = CLUB_CATEGORIES.indexOf(a.category) - CLUB_CATEGORIES.indexOf(b.category);
+    if (catDiff !== 0) return catDiff;
+    if (a.category === "Wedge") {
+      return WEDGE_TYPES.indexOf(a.wedgeType) - WEDGE_TYPES.indexOf(b.wedgeType);
+    }
+    const aNum = parseInt(a.number), bNum = parseInt(b.number);
+    if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+    if (!isNaN(aNum)) return -1; // numbered clubs before unnumbered ones in the same category
+    if (!isNaN(bNum)) return 1;
+    return 0;
+  });
 
   return (
     <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 100 }}>
@@ -2995,6 +3016,40 @@ function BagScreen({ user, onUpdateUser, onBack }) {
           </div>
         );
       })}
+
+      {sortedClubs.length > 0 && (
+        <div style={{ margin: "4px 18px 24px" }}>
+          {user.bagCompleted ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", background: C.cloud, border: `1px solid ${C.line}` }}>
+              <div style={{ width: 26, height: 26, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <div style={{ width: 13, height: 13, color: C.white }}><Icon.Check /></div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: C.black }}>Bag marked as complete</div>
+                <div style={{ fontSize: 10.5, color: C.steel, marginTop: 1 }}>You can still add, edit, or remove clubs any time.</div>
+              </div>
+              <button
+                onClick={() => onUpdateUser({ ...user, bagCompleted: false })}
+                style={{ fontSize: 10.5, fontWeight: 700, color: C.steel, background: "none", border: "none", textDecoration: "underline", cursor: "pointer", flexShrink: 0, padding: 0 }}
+              >
+                Undo
+              </button>
+            </div>
+          ) : (
+            <button
+              className="btn btn-primary"
+              onClick={() => onUpdateUser({ ...user, bagCompleted: true })}
+            >
+              Mark Bag as Complete
+            </button>
+          )}
+          {!user.bagCompleted && (
+            <p style={{ fontSize: 10.5, color: C.steel, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>
+              Once your bag reflects what you actually carry, mark it complete — this stops the reminder on login. You can keep editing any time.
+            </p>
+          )}
+        </div>
+      )}
 
       <button className="fab" onClick={openAdd}><Icon.Plus /></button>
 
