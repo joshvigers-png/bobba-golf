@@ -486,6 +486,13 @@ const css = `
   .club-meta{font-size:11px;color:${C.steel};margin-top:2px;}
   .club-yardage{font-family:'Inter',sans-serif;font-weight:900;font-size:20px;color:${C.black};}
   .club-yardage-lbl{font-size:9px;color:${C.steel};font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
+  .club-yardage-cols{display:flex;gap:5px;flex-shrink:0;}
+  .club-yardage-col{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:42px;padding:6px 7px;border-radius:6px;}
+  .club-yardage-col.summer{background:#EBC061;}
+  .club-yardage-col.winter{background:#9FC9E6;}
+  .club-yardage-col-icon{width:11px;height:11px;margin-bottom:2px;}
+  .club-yardage-col-val{font-family:'Inter',sans-serif;font-weight:900;font-size:16px;color:${C.black};line-height:1;}
+  .club-yardage-col-lbl{font-size:7.5px;color:${C.charcoal};font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
 
   /* ── Floating add button ── */
   .fab{position:fixed;bottom:96px;right:24px;width:54px;height:54px;border-radius:50%;background:${C.black};color:${C.white};display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(10,10,10,.3);cursor:pointer;z-index:90;border:none;}
@@ -2912,29 +2919,31 @@ function BagScreen({ user, onUpdateUser, onBack }) {
         return (
           <div key={c.id} className="club-card" onClick={() => openEdit(c)} style={{ cursor: "pointer" }}>
             <div className="club-top">
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, marginRight: 10 }}>
                 <div className="club-icon-wrap">
                   <span style={{ color: C.white, fontWeight: 900, fontSize: code.length > 2 ? 11 : 14, letterSpacing: "-0.02em" }}>{code}</span>
                 </div>
-                <div>
-                  <div className="club-name">{c.make || c.model ? `${c.make||""} ${c.model||""}`.trim() : c.category}</div>
-                  <div className="club-meta">
-                    {c.category}{c.number ? ` ${c.number}` : ""}{c.category==="Wedge" && c.wedgeType ? ` (${c.wedgeType})` : ""}{c.loft ? ` · ${c.loft}°` : ""}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="club-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.make || c.model ? `${c.make||""} ${c.model||""}`.trim() : clubFullLabel(c)}</div>
+                  <div className="club-meta" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {clubFullLabel(c)}{c.loft ? ` · ${c.loft}°` : ""}
                   </div>
                 </div>
               </div>
               {(summerY || winterY) && (
-                <div style={{ textAlign: "right" }}>
+                <div className="club-yardage-cols" style={{ flexShrink: 0 }}>
                   {summerY && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
-                      <div className="club-yardage">{summerY}</div>
-                      <div style={{ width: 13, height: 13, color: C.steel, flexShrink: 0 }}><Icon.Sun /></div>
+                    <div className="club-yardage-col summer">
+                      <div className="club-yardage-col-icon" style={{ color: "#B8780F" }}><Icon.Sun /></div>
+                      <div className="club-yardage-col-val">{summerY}</div>
+                      <div className="club-yardage-col-lbl">Summer</div>
                     </div>
                   )}
                   {winterY && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", marginTop: summerY ? 2 : 0 }}>
-                      <div className="club-yardage">{winterY}</div>
-                      <div style={{ width: 13, height: 13, color: C.steel, flexShrink: 0 }}><Icon.Snowflake /></div>
+                    <div className="club-yardage-col winter">
+                      <div className="club-yardage-col-icon" style={{ color: "#3A7CB8" }}><Icon.Snowflake /></div>
+                      <div className="club-yardage-col-val">{winterY}</div>
+                      <div className="club-yardage-col-lbl">Winter</div>
                     </div>
                   )}
                 </div>
