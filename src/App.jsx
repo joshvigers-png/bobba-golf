@@ -2817,6 +2817,19 @@ function clubCode(club) {
   if (cat === "Wedge") return club.wedgeType || "W";
   return cat ? cat[0] : "?";
 }
+// Full readable label for contexts with more room than the bag's compact
+// badges — e.g. "3 Wood", "4 Hybrid", "7 Iron", "PW Wedge" — rather than
+// every iron/wedge looking identical with just the bare category name.
+function clubFullLabel(club) {
+  const cat = club.category;
+  if (cat === "Driver") return "Driver";
+  if (cat === "Putter") return "Putter";
+  if (cat === "Wood") return club.number ? `${club.number} Wood` : "Wood";
+  if (cat === "Hybrid") return club.number ? `${club.number} Hybrid` : "Hybrid";
+  if (cat === "Iron") return club.number ? `${club.number} Iron` : "Iron";
+  if (cat === "Wedge") return club.wedgeType ? `${club.wedgeType} Wedge` : "Wedge";
+  return cat || "Club";
+}
 
 function BagScreen({ user, onUpdateUser, onBack }) {
   const [clubs, setClubs] = useState(user.bag || []);
@@ -4798,7 +4811,7 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
         const pct = trackable ? Math.min(100, Math.max(0, (gain / target) * 100)) : null;
         return {
           id: c.id,
-          name: c.make || c.model ? `${c.make||""} ${c.model||""}`.trim() : c.category,
+          name: clubFullLabel(c),
           category: c.category,
           baseline, current, gain, pct,
           done: trackable && gain >= target,
@@ -4924,19 +4937,39 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
                       ) : (
                         <>
                           <div className="goal-stat-row" style={{ marginBottom: 8 }}><span>{progress.label}</span></div>
-                          {progress.perClub.map(c => (
-                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                              <div style={{ width: 70, fontSize: 10.5, fontWeight: 700, color: C.black, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.category}</div>
-                              <div style={{ flex: 1, height: 14, background: C.cloud, borderRadius: 8, overflow: "hidden" }}>
-                                {c.trackable && (
-                                  <div style={{ height: "100%", borderRadius: 8, background: c.done ? "#1B7A3D" : C.black, width: `${Math.max(c.pct, c.pct > 0 ? 4 : 0)}%`, transition: "width .3s ease" }} />
-                                )}
+                          {progress.perClub.map(c => {
+                            const barColor = !c.trackable ? C.fog : c.pct >= 66 ? "#1B7A3D" : c.pct >= 33 ? "#E08A1E" : "#C8392D";
+                            return (
+                              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                <div style={{ width: 60, fontSize: 10.5, fontWeight: 700, color: C.black, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+                                <div style={{ width: 38, textAlign: "right", fontSize: 10, fontWeight: 600, color: C.steel, flexShrink: 0 }}>
+                                  {c.current != null ? `${c.current}y` : "—"}
+                                </div>
+                                <div style={{ flex: 1, height: 14, background: C.cloud, borderRadius: 8, overflow: "hidden" }}>
+                                  {c.trackable && (
+                                    <div style={{ height: "100%", borderRadius: 8, background: barColor, width: `${Math.max(c.pct, c.pct > 0 ? 4 : 0)}%`, transition: "width .3s ease" }} />
+                                  )}
+                                </div>
+                                <div style={{ width: 44, textAlign: "right", fontSize: 10.5, fontWeight: 800, color: !c.trackable ? C.ash : c.gain > 0 ? "#1B7A3D" : c.gain < 0 ? C.red : C.steel, flexShrink: 0 }}>
+                                  {c.trackable ? `${c.gain > 0 ? "+" : ""}${c.gain}y` : "—"}
+                                </div>
                               </div>
-                              <div style={{ width: 56, textAlign: "right", fontSize: 10.5, fontWeight: 800, color: !c.trackable ? C.ash : c.gain > 0 ? "#1B7A3D" : c.gain < 0 ? C.red : C.steel, flexShrink: 0 }}>
-                                {c.trackable ? `${c.gain > 0 ? "+" : ""}${c.gain}y` : "—"}
-                              </div>
+                            );
+                          })}
+                          <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#C8392D" }} />
+                              <span style={{ fontSize: 9, color: C.steel, fontWeight: 600 }}>Just started</span>
                             </div>
-                          ))}
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#E08A1E" }} />
+                              <span style={{ fontSize: 9, color: C.steel, fontWeight: 600 }}>Halfway</span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#1B7A3D" }} />
+                              <span style={{ fontSize: 9, color: C.steel, fontWeight: 600 }}>Close to target</span>
+                            </div>
+                          </div>
                         </>
                       )}
                     </div>
