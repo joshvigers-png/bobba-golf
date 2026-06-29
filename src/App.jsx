@@ -3266,6 +3266,29 @@ function computeGameStats(user, rounds, range = "all") {
     return s + (c ? c.holes.reduce((ps,h)=>ps+h.par,0) : 72);
   }, 0) / filtered.length) : 72;
   const avgOverPar = avgScore - avgParPlayed;
+
+  // ── Consistency: standard deviation of (gross score relative to par)  ──
+  // ── across rounds. Using relative-to-par rather than raw gross score  ──
+  // ── means playing an easier or harder course doesn't get mistaken for ──
+  // ── "more/less consistent" — this isolates actual round-to-round      ──
+  // ── variability in how someone is playing, not the course they chose. ──
+  const roundsOverPar = filtered
+    .filter(r => r.totalGross != null)
+    .map(r => {
+      const par = r.coursePar ?? (() => {
+        const c = r.course || COURSE_DB.find(cc => cc.id === r.courseId);
+        return c ? c.holes.reduce((ps,h)=>ps+h.par,0) : 72;
+      })();
+      return r.totalGross - par;
+    });
+  let scoreSpread = null; // standard deviation, in strokes — lower = more consistent
+  if (roundsOverPar.length >= 2) {
+    const mean = roundsOverPar.reduce((s,v)=>s+v,0) / roundsOverPar.length;
+    const variance = roundsOverPar.reduce((s,v)=>s+(v-mean)**2,0) / roundsOverPar.length;
+    scoreSpread = Math.sqrt(variance);
+  }
+  const bestRoundOverPar = roundsOverPar.length ? Math.min(...roundsOverPar) : null;
+  const worstRoundOverPar = roundsOverPar.length ? Math.max(...roundsOverPar) : null;
   const totalLost = holeStats.reduce((s,h)=>s+h.lost,0);
   const lostPerRound = filtered.length ? totalLost / filtered.length : 0;
   const puttedHoles = holeStats.filter(h => h.putts != null);
@@ -3310,7 +3333,8 @@ function computeGameStats(user, rounds, range = "all") {
   return {
     filtered, holeStats, dist, birdiesOrBetter, birdieRate,
     worstHoles, bestHoles, avgScore, avgPts, avgParPlayed, avgOverPar,
-    totalLost, lostPerRound, avgPutts, avgPuttsPerRound, threePutts, threePuttRate,
+    scoreSpread, bestRoundOverPar, worstRoundOverPar,
+    totalLost, lostPerRound, avgPutts, avgPuttsPerRound, threePutts, threePuttRate, puttedHolesCount: puttedHoles.length,
     firRate, girRate, avgPuttsGIR, avgPuttsOffGIR, trend,
     bagWithYardage, biggestGap, missingCategories, driver, driverLoft, driverYardage,
   };
@@ -4479,12 +4503,12 @@ function goalsKey(uid) { return `bb_goals_${uid}`; }
 // data yet to say anything meaningful — no filler text.
 function buildGoalAdvice(goal, user, stats) {
   if (goal.type === "handicap") {
-    if (!stats) return { tag: "Lower Handicap", title: "Log a few rounds to get started", body: "Submit some scorecards from Play a Round and this will tell you exactly what's costing you strokes." };
+    if (!stats) return { tag: "Lower Handicap", title: "Log a few rounds to get started", insight: "Submit some scorecards from Play a Round and this will tell you exactly what's costing you strokes.", drill: null, gymTip: null };
     const current = user.handicap ?? null;
     const target = parseFloat(goal.target);
     if (current == null || isNaN(target)) return null;
     const gap = current - target;
-    if (gap <= 0) return { tag: "Lower Handicap", title: "Goal reached", body: `Your index is already ${current.toFixed(1)}, at or below your target of ${target.toFixed(1)}. Set a new target to keep pushing.` };
+    if (gap <= 0) return { tag: "Lower Handicap", title: "Goal reached", insight: `Your index is already ${current.toFixed(1)}, at or below your target of ${target.toFixed(1)}. Set a new target to keep pushing.`, drill: null, gymTip: null };
 
     const leaks = [];
     if (stats.threePuttRate >= 0.15) leaks.push(`3-putting ${Math.round(stats.threePuttRate*100)}% of greens`);
@@ -4498,58 +4522,195 @@ function buildGoalAdvice(goal, user, stats) {
     return {
       tag: "Lower Handicap",
       title: `${gap.toFixed(1)} shots to go`,
-      body: leaks.length
+      insight: leaks.length
         ? `Your biggest leak right now: ${leaks[0]}. Closing that gap alone could realistically take a shot or two off your average round before you touch anything else.${paceWarning ? " Your recent rounds are trending the wrong way — worth a lesson to reset before the deadline." : ""}`
         : `Your underlying numbers look solid — getting from ${current.toFixed(1)} to ${target.toFixed(1)} is mostly about consistency now. Play your practice rounds the same way you'd play a competition.`,
+      drill: leaks[0]?.includes("3-putting") ? "Lag putting ladder: 15ft, 30ft, 45ft putts to a target, counting how many finish inside a 3ft circle."
+        : leaks[0]?.includes("greens in regulation") ? "Yardage ladders with your irons — hit 5 balls each with 3 different clubs and note real carry distance, not your best-ever shot."
+        : leaks[0]?.includes("fairways") ? "Fairway finder drill: 10 tee shots at a 220-250y target, scoring fairway-width hits higher than raw distance."
+        : leaks[0]?.includes("losing") ? "Play a practice round choosing the safe line off every tee, even if it costs distance — track how many fairways/greens that adds." : "Play 9 holes focusing purely on course management — slowest swing speed that still reaches your target, no risk-taking.",
+      gymTip: "Rotational core work (cable woodchops, medicine ball throws) builds the stable base that makes ball-striking more repeatable under pressure.",
     };
   }
 
   if (goal.type === "birdies") {
-    if (!stats) return { tag: "More Birdies", title: "Log a few rounds to get started", body: "Once you've submitted some scorecards, this will show exactly what's stopping more birdies going in." };
+    if (!stats) return { tag: "More Birdies", title: "Log a few rounds to get started", insight: "Once you've submitted some scorecards, this will show exactly what's stopping more birdies going in.", drill: null, gymTip: null };
     const target = parseFloat(goal.target);
-    const currentRate = stats.birdieRate;
     if (stats.girRate != null && stats.girRate < 0.30) {
-      return { tag: "More Birdies", title: "Start with greens in regulation", body: `You're hitting only ${Math.round(stats.girRate*100)}% of greens — you can't make birdies you don't get a look at. Approach distance control at the range will create more chances than putting practice will right now.` };
+      return { tag: "More Birdies", title: "Start with greens in regulation", insight: `You're hitting only ${Math.round(stats.girRate*100)}% of greens — you can't make birdies you don't get a look at.`, drill: "Approach distance control: hit 5 balls each with 3 approach clubs to a specific target, tracking how many finish inside a 15ft circle.", gymTip: "Shoulder mobility work (band pull-aparts, wall slides) helps build a more consistent, repeatable approach swing." };
     }
     if (stats.avgPuttsOffGIR != null && stats.avgPuttsGIR != null && stats.avgPuttsOffGIR - stats.avgPuttsGIR >= 0.5) {
-      return { tag: "More Birdies", title: "Your short game is the gap", body: `When you miss the green you're taking ${(stats.avgPuttsOffGIR-stats.avgPuttsGIR).toFixed(1)} more putts than when you hit it. Chipping and pitching practice will convert more of your GIR misses into easy up-and-down birdie chances.` };
+      return { tag: "More Birdies", title: "Your short game is the gap", insight: `When you miss the green you're taking ${(stats.avgPuttsOffGIR-stats.avgPuttsGIR).toFixed(1)} more putts than when you hit it — that's birdie chances turning into pars or worse.`, drill: "Up-and-down practice: 10 balls from 30 yards on the chipping green, tracking how many finish inside 6ft.", gymTip: "Wrist and forearm strength (light dumbbell wrist curls) improves control on delicate chip and pitch shots." };
     }
     if (stats.threePuttRate >= 0.12) {
-      return { tag: "More Birdies", title: "Lag putting is the lever here", body: `A ${Math.round(stats.threePuttRate*100)}% 3-putt rate means lost momentum on holes you were already playing well. Spend range time on 20-40ft putts — fewer 3-putts means more looks at birdie continuing through the round.` };
+      return { tag: "More Birdies", title: "Lag putting is the lever here", insight: `A ${Math.round(stats.threePuttRate*100)}% 3-putt rate means lost momentum on holes you were already playing well.`, drill: "Lag putting ladder from 20-40ft — fewer 3-putts means more looks at birdie continuing through the round.", gymTip: "Balance and core stability work (single-leg holds, plank variations) supports a steadier putting stroke." };
     }
-    return { tag: "More Birdies", title: "Your fundamentals are in place", body: `Greens in regulation and putting both look solid — ${target ? `getting to ${target} birdies a round` : "more birdies"} from here is mostly about course management: take the club that gets you to the fat part of the green, not the flag.` };
+    return { tag: "More Birdies", title: "Your fundamentals are in place", insight: `Greens in regulation and putting both look solid — ${target ? `getting to ${target} birdies a round` : "more birdies"} from here is mostly about course management.`, drill: "Practice rounds aiming at the fat part of every green rather than the flag — track how many real birdie putts (inside 15ft) that creates.", gymTip: "General conditioning (steady cardio + mobility) keeps decision-making sharp on the back nine when birdie chances matter most." };
   }
 
   if (goal.type === "distance") {
-    const driver = stats?.driver;
     const bag = user.bag || [];
+    const target = parseFloat(goal.target);
     if (!bag.length) {
-      return { tag: "More Distance", title: "Add your clubs to The Bag", body: "Log your driver and woods with their lofts and yardages, and this will tell you exactly where to find more distance." };
+      return { tag: "More Distance", title: "Add your clubs to The Bag", insight: "Log your clubs with their lofts and yardages, and this will tell you exactly where to find more distance.", drill: null, gymTip: null };
     }
-    if (!driver) {
-      return { tag: "More Distance", title: "No driver logged", body: "Add your driver in The Bag with its loft and current yardage — loft is usually the fastest distance gain available without a swing change." };
-    }
-    const loft = stats.driverLoft;
-    const yardage = stats.driverYardage;
-    if (loft != null && loft <= 9.5) {
-      return { tag: "More Distance", title: `Your driver loft (${loft}°) is on the low side`, body: `Lower lofts need faster swing speed to optimise launch and spin. Unless you're consistently swinging 105mph+, trying a 10.5° or 12° head — or having it adjusted if it's adjustable — often adds real carry distance without any swing changes.` };
+    const driver = stats?.driver;
+    const driverLoft = stats?.driverLoft;
+    if (driver && driverLoft != null && driverLoft <= 9.5) {
+      return {
+        tag: "More Distance",
+        title: `Your driver loft (${driverLoft}°) is on the low side`,
+        insight: `Lower lofts need faster swing speed to optimise launch and spin. Unless you're consistently swinging 105mph+, a higher-lofted head often adds real carry distance without any swing changes — and that gain shows up immediately once you update your driver's yardage in The Bag.`,
+        drill: "Launch monitor or range session with a borrowed 10.5°/12° head, comparing carry distance directly against your current driver.",
+        gymTip: "Rotational power training (medicine ball slams, cable rotations) builds the clubhead speed that helps every club in the bag, not just the driver.",
+      };
     }
     if (stats?.biggestGap && stats.biggestGap.gap >= 30) {
-      return { tag: "More Distance", title: `${stats.biggestGap.gap}y gap in your bag`, body: `Between your ${stats.biggestGap.longer.category} and ${stats.biggestGap.shorter.category} there's a ${stats.biggestGap.gap}-yard hole with no club to cover it — that's strokes lost to guesswork, not a distance problem. A stronger-lofted hybrid or fairway wood in between would help more than chasing extra yards off the tee.` };
+      return {
+        tag: "More Distance",
+        title: `${stats.biggestGap.gap}y gap in your bag`,
+        insight: `Between your ${stats.biggestGap.longer.category} and ${stats.biggestGap.shorter.category} there's a ${stats.biggestGap.gap}-yard hole with no club to cover it. Filling that gap won't show up as "distance gained" on any one club, but it's often more valuable than chasing extra yards everywhere.`,
+        drill: "Try a stronger-lofted hybrid or fairway wood at the range, comparing real carry distance into that exact gap, then update its yardage in The Bag once you've settled on one.",
+        gymTip: "General strength and rotational power training supports more consistent contact across your whole bag.",
+      };
     }
-    return { tag: "More Distance", title: "Loft and gapping look reasonable", body: `${yardage ? `At ${yardage}y your driver distance is already solid — ` : ""}further gains from here are more likely to come from strength and speed training (range sessions focused on tempo, not just hitting balls) than from equipment changes. Consider a few lessons focused specifically on swing speed.` };
+    return {
+      tag: "More Distance",
+      title: `Working toward +${isNaN(target) ? "—" : target}y`,
+      insight: "Distance gains are genuinely individual — some golfers find it in flexibility, others in raw strength or pure technique. Whichever club you make progress on, update its yardage in The Bag and that club's progress bar will move.",
+      drill: "Tempo-focused range sessions: 80% swings at full commitment, gradually building speed without losing contact quality. Track real carry distance with each session, not your best-ever shot.",
+      gymTip: "Speed training (overspeed swings with lighter weighted clubs, explosive medicine-ball throws) is the most proven way to add clubhead speed and distance across the whole bag.",
+    };
   }
 
-  // custom — generic encouragement, since there's no structured signal to analyse
-  return { tag: "Custom Goal", title: "Keep tracking your rounds", body: "The more scorecards you log, the more specific this advice can get. Check back here as you build up round history." };
+  if (goal.type === "consistency") {
+    if (!stats || stats.scoreSpread == null) {
+      return { tag: "Consistency", title: "Log a few more rounds", insight: "Consistency needs at least 2 rounds in the selected period to measure — keep submitting scorecards and this will start tracking your spread.", drill: null, gymTip: null };
+    }
+    const spread = stats.scoreSpread;
+    const target = parseFloat(goal.target);
+    const best = stats.bestRoundOverPar, worst = stats.worstRoundOverPar;
+    const gapBetweenBestWorst = (best != null && worst != null) ? worst - best : null;
+
+    const totalHolesLogged = stats.dist.albatross + stats.dist.eagle + stats.dist.birdie + stats.dist.par + stats.dist.bogey + stats.dist.double + stats.dist.tripleplus;
+    const blowUpRate = totalHolesLogged ? stats.dist.tripleplus / totalHolesLogged : 0;
+
+    if (!isNaN(target) && spread <= target) {
+      return { tag: "Consistency", title: "Goal reached", insight: `Your scores are landing within ±${spread.toFixed(1)} strokes of each other, at or inside your ±${target.toFixed(1)} target.`, drill: "Set a tighter target to keep pushing, or hold here and focus on lowering your average instead.", gymTip: "Maintaining a consistent pre-shot routine and breathing pattern under fatigue helps lock in this kind of repeatability." };
+    }
+
+    if (blowUpRate >= 0.08) {
+      return {
+        tag: "Consistency",
+        title: `Blow-up holes are the main driver`,
+        insight: `You're averaging ±${spread.toFixed(1)} strokes round to round${gapBetweenBestWorst != null ? `, with a ${gapBetweenBestWorst}-shot gap between your best and worst round` : ""}. ${Math.round(blowUpRate*100)}% of your logged holes are triple-bogey or worse — usually one or two disaster holes dragging an otherwise similar score out of shape.`,
+        drill: "Practice 'damage control' on the chipping green: from a bad lie, the only goal is getting back into play, not the green. Track how often you avoid a second penalty shot.",
+        gymTip: "Breathing/composure routines (a fixed pre-shot breath count) help reset after a bad shot before the next one compounds it.",
+      };
+    }
+
+    return {
+      tag: "Consistency",
+      title: `±${spread.toFixed(1)} strokes round to round`,
+      insight: `${gapBetweenBestWorst != null ? `Your best and worst rounds in this period are ${gapBetweenBestWorst} shots apart. ` : ""}Without an obvious blow-up-hole pattern, this points to ball-striking or course management varying round to round.`,
+      drill: "Play practice rounds with the exact same pre-shot routine and club selections you'd use in competition, rather than experimenting.",
+      gymTip: "Consistent sleep and warm-up routines before rounds reduce the physical variability that often shows up as inconsistent ball-striking.",
+    };
+  }
+
+  if (goal.type === "putting") {
+    if (!stats || stats.avgPutts == null) {
+      return { tag: "Putting", title: "Log a few more rounds", insight: "Putting needs a few rounds with putts recorded per hole before this can give you real numbers.", drill: null, gymTip: null };
+    }
+    const target = parseFloat(goal.target);
+    const avgPuttsRound = stats.avgPuttsPerRound;
+    const threePuttPct = Math.round(stats.threePuttRate * 100);
+    if (!isNaN(target) && avgPuttsRound != null && avgPuttsRound <= target) {
+      return { tag: "Putting", title: "Goal reached", insight: `You're averaging ${avgPuttsRound.toFixed(1)} putts a round, at or under your target of ${target.toFixed(1)}.`, drill: "Set a tighter target, or shift focus to converting more lag putts into 1-putts rather than just avoiding 3-putts.", gymTip: "Fine motor control work (e.g. juggling, hand-eye drills) can sharpen the touch putting relies on." };
+    }
+    if (stats.threePuttRate >= 0.15) {
+      return { tag: "Putting", title: `3-putting ${threePuttPct}% of greens`, insight: `${stats.threePutts} three-putts across ${stats.puttedHolesCount ?? "your logged"} holes — this is almost always a distance-control issue on longer putts, not the short stuff.`, drill: "Lag putting ladder: putt to 15ft, 30ft, and 45ft targets, scoring how many finish inside a 3ft circle each time.", gymTip: "Balance training (single-leg stance work) supports a steadier lower body through the stroke, especially on longer putts." };
+    }
+    if (stats.avgPuttsGIR != null && stats.avgPuttsOffGIR != null) {
+      return { tag: "Putting", title: `Averaging ${avgPuttsRound?.toFixed(1) ?? "—"} putts per round`, insight: `On greens you hit in regulation you average ${stats.avgPuttsGIR.toFixed(1)} putts — that's your real putting baseline. Closing the overall average further is mostly about first-putt distance control.`, drill: "9-hole putting-only practice: play only the putting, dropping a ball 20-40ft from the pin on every green.", gymTip: "Light daily wrist and grip strengthening can improve consistency of strike on the putter face." };
+    }
+    return { tag: "Putting", title: "Keep logging putts per hole", insight: "Recording putts on every hole (not just some) will sharpen this advice considerably.", drill: "Lag putting ladder from 20-40ft as a baseline drill regardless.", gymTip: "Balance and grip strength work generally support a more repeatable stroke." };
+  }
+
+  if (goal.type === "shortgame") {
+    if (!stats || (stats.avgPuttsOffGIR == null && stats.girRate == null)) {
+      return { tag: "Short Game", title: "Log a few more rounds", insight: "Short game needs a few rounds with GIR and putts recorded to estimate your up-and-down performance.", drill: null, gymTip: null };
+    }
+    const offGirPutts = stats.avgPuttsOffGIR;
+    const onGirPutts = stats.avgPuttsGIR;
+    const gap = (offGirPutts != null && onGirPutts != null) ? offGirPutts - onGirPutts : null;
+    // Note: this is an estimate, not a direct measurement — the app
+    // doesn't currently track individual chip/pitch shot results, only
+    // putts taken after missing the green, which is the best available
+    // proxy for short-game performance from existing scorecard data.
+    if (gap != null && gap >= 0.5) {
+      return {
+        tag: "Short Game",
+        title: `${gap.toFixed(1)} extra putts when missing greens`,
+        insight: `Estimated from your putts after missing greens — this isn't a direct chip/pitch measurement, but a clear proxy. You average ${onGirPutts.toFixed(1)} putts on greens you hit vs ${offGirPutts.toFixed(1)} when you miss, meaning your chips/pitches aren't consistently getting close enough to one-putt range.`,
+        drill: "Up-and-down practice from 3 distances (10y, 30y, 50y) — 5 balls each, tracking how many finish inside 6ft of the pin.",
+        gymTip: "Hip and core mobility work improves the controlled, abbreviated swing chipping and pitching rely on.",
+      };
+    }
+    if (stats.girRate != null && stats.girRate < 0.35) {
+      return { tag: "Short Game", title: "Short game looks solid — approach is the bigger gap", insight: `Your up-and-down performance looks reasonable, but you're only hitting ${Math.round(stats.girRate*100)}% of greens — fewer short-game chances overall than a typical round creates.`, drill: "Iron yardage ladders to tighten approach distances, which will create more (easier) short-game looks.", gymTip: "Shoulder and thoracic mobility work supports more consistent approach-shot quality." };
+    }
+    return { tag: "Short Game", title: "Solid short game numbers", insight: "Your putts-after-missed-green numbers look close to your on-green average, suggesting decent up-and-down ability already.", drill: "Push the difficulty: practice from tighter lies and longer distances (40-60y) to extend your scoring range.", gymTip: "General rotational mobility work keeps short-game technique sharp under varied lies and stances." };
+  }
+
+  if (goal.type === "bunker") {
+    // No bunker data is currently tracked on the scorecard, so this stays
+    // generic rather than pretending to analyse data that doesn't exist.
+    return {
+      tag: "Bunker Play",
+      title: "General bunker fundamentals",
+      insight: "Bunker shots aren't currently tracked on your scorecards, so this can't be tailored to your own data yet — these are general fundamentals worth drilling regardless of where your game stands.",
+      drill: "From a practice bunker, draw a line in the sand and practice hitting 2-3 inches behind it consistently before adding a ball — entry point matters more than swing power.",
+      gymTip: "Hip rotation and ankle stability work (lateral lunges, single-leg balance) helps maintain footing and rotation in soft sand.",
+    };
+  }
+
+  if (goal.type === "approach") {
+    if (!stats || stats.girRate == null) {
+      return { tag: "Approach Play", title: "Log a few more rounds", insight: "Approach play needs a few rounds with greens in regulation recorded before this can give you real numbers.", drill: null, gymTip: null };
+    }
+    const target = parseFloat(goal.target);
+    const girPct = Math.round(stats.girRate * 100);
+    if (!isNaN(target) && girPct >= target) {
+      return { tag: "Approach Play", title: "Goal reached", insight: `You're hitting ${girPct}% of greens in regulation, at or above your ${Math.round(target)}% target.`, drill: "Set a tighter GIR target, or shift focus to leaving approach shots below the pin for easier uphill putts.", gymTip: "Continue shoulder and core mobility work to keep approach contact consistent as you push the target higher." };
+    }
+    if (stats.firRate != null && stats.firRate < 0.5) {
+      return { tag: "Approach Play", title: "Fairway accuracy is limiting your approaches", insight: `You're hitting ${girPct}% of greens, but missing over half your fairways (${Math.round(stats.firRate*100)}%) means a lot of your approach shots start from the rough, not the fairway — that alone explains a big chunk of missed greens.`, drill: "Fairway finder drill: 10 tee shots at a 220-250y target, scoring fairway-width hits over total distance.", gymTip: "Core stability work (planks, dead bugs) supports a more repeatable tee-shot pattern, which sets up easier approaches." };
+    }
+    return {
+      tag: "Approach Play",
+      title: `${girPct}% greens in regulation`,
+      insight: `From the fairway, the most common cause of missed greens is inconsistent distance control with approach clubs rather than direction.`,
+      drill: "Iron yardage ladders: hit 5 balls each with 3 different approach clubs and log the real carry distance, not your best-ever shot — most golfers overestimate by 10-15 yards.",
+      gymTip: "Shoulder and thoracic mobility work (band pull-aparts, rotational stretches) helps build a more repeatable approach swing.",
+    };
+  }
+
+  // Unrecognised goal type (e.g. from older saved data) — no structured
+  // signal to analyse, so return nothing rather than guessing.
+  return null;
 }
 
 function GoalsScreen({ user, onBack, onUpdateUser }) {
   const GOAL_TYPES = [
-    { id: "handicap", label: "Lower Handicap", icon: <Icon.TrendDown /> },
-    { id: "birdies",  label: "More Birdies",   icon: <Icon.Flag /> },
-    { id: "distance", label: "More Distance",  icon: <Icon.Range /> },
-    { id: "custom",   label: "Custom Goal",    icon: <Icon.Target /> },
+    { id: "handicap",    label: "Lower Handicap",   icon: <Icon.TrendDown /> },
+    { id: "birdies",     label: "More Birdies",     icon: <Icon.Flag /> },
+    { id: "consistency", label: "Consistency",      icon: <Icon.Stat /> },
+    { id: "distance",    label: "More Distance",    icon: <Icon.Range /> },
+    { id: "putting",     label: "Improve Putting",  icon: <Icon.Ball /> },
+    { id: "bunker",      label: "Bunker Play",      icon: <Icon.Club /> },
+    { id: "shortgame",   label: "Short Game",       icon: <Icon.Spark /> },
+    { id: "approach",    label: "Approach Play",    icon: <Icon.Target /> },
   ];
 
   const [goals, setGoals] = useState(LS.get(goalsKey(user.id)) || []);
@@ -4567,17 +4728,39 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
     if (type === "handicap") return "Lower my handicap";
     if (type === "birdies") return "Score more birdies";
     if (type === "distance") return "Hit the ball further";
+    if (type === "consistency") return "Play more consistently";
+    if (type === "putting") return "Improve my putting";
+    if (type === "bunker") return "Get better from bunkers";
+    if (type === "shortgame") return "Sharpen my short game";
+    if (type === "approach") return "Hit more greens";
     return "";
   };
 
   const saveGoal = () => {
-    if (!form.target && form.type !== "custom") return;
-    if (form.type === "custom" && !form.title.trim()) return;
+    if (!form.target && form.type !== "bunker") return;
+    // Distance goals snapshot EVERY club's current yardage (summer figure,
+    // falling back to the legacy single-yardage field) at the moment the
+    // goal is created. Progress is then tracked per club independently as
+    // the person updates The Bag over time — gaining distance on a driver
+    // but not on a 9-iron is real, honest progress on one club and none on
+    // the other, not something that should be averaged together.
+    const clubBaselines = {};
+    if (form.type === "distance") {
+      (user.bag || []).forEach(c => {
+        const y = parseInt(c.summerYardage || c.yardage);
+        clubBaselines[c.id] = !isNaN(y) ? y : null;
+      });
+    }
     const goal = {
       id: Date.now(), type: form.type,
       title: form.title.trim() || defaultTitle(form.type),
       target: form.target, dueDate: form.dueDate || null,
       startHandicap: form.type === "handicap" ? user.handicap : null,
+      startSpread: form.type === "consistency" ? (stats?.scoreSpread ?? null) : null,
+      startPutts: form.type === "putting" ? (stats?.avgPuttsPerRound ?? null) : null,
+      startShortGameGap: form.type === "shortgame" && stats?.avgPuttsOffGIR != null && stats?.avgPuttsGIR != null ? (stats.avgPuttsOffGIR - stats.avgPuttsGIR) : null,
+      startGirRate: form.type === "approach" ? (stats?.girRate ?? null) : null,
+      clubBaselines: form.type === "distance" ? clubBaselines : null,
       createdAt: Date.now(), completed: false,
     };
     persist([...goals, goal]);
@@ -4604,10 +4787,80 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
     }
     if (goal.type === "distance") {
       const target = parseFloat(goal.target);
-      const current = stats?.driverYardage;
-      if (isNaN(target) || !current) return { pct: 0, done: false, label: current ? `${current}y` : "No driver yardage logged" };
+      const baselines = goal.clubBaselines || {};
+      const bag = user.bag || [];
+      const perClub = bag.map(c => {
+        const baseline = baselines[c.id];
+        const currentY = parseInt(c.summerYardage || c.yardage);
+        const current = !isNaN(currentY) ? currentY : null;
+        const trackable = baseline != null && current != null && !isNaN(target);
+        const gain = trackable ? current - baseline : null;
+        const pct = trackable ? Math.min(100, Math.max(0, (gain / target) * 100)) : null;
+        return {
+          id: c.id,
+          name: c.make || c.model ? `${c.make||""} ${c.model||""}`.trim() : c.category,
+          category: c.category,
+          baseline, current, gain, pct,
+          done: trackable && gain >= target,
+          trackable,
+        };
+      }).filter(c => c.category !== "Putter"); // distance goals don't apply to putters
+      const trackableClubs = perClub.filter(c => c.trackable);
+      const bestGain = trackableClubs.length ? Math.max(...trackableClubs.map(c => c.gain)) : null;
+      const anyDone = trackableClubs.some(c => c.done);
+      return {
+        pct: null, // no single collapsed percentage — see perClub below
+        perClub,
+        done: anyDone,
+        label: trackableClubs.length
+          ? `Best gain: ${bestGain >= 0 ? "+" : ""}${bestGain}y of ${target}y target`
+          : "Update club yardages in The Bag to track progress",
+      };
+    }
+    if (goal.type === "consistency") {
+      const target = parseFloat(goal.target);
+      const start = goal.startSpread ?? stats?.scoreSpread;
+      const current = stats?.scoreSpread;
+      if (start == null || current == null || isNaN(target)) {
+        return { pct: 0, done: false, label: current != null ? `±${current.toFixed(1)} strokes` : "Log at least 2 rounds" };
+      }
+      if (start === target) return { pct: current <= target ? 100 : 0, done: current <= target, label: `±${current.toFixed(1)} → ±${target.toFixed(1)}` };
+      const pct = Math.min(100, Math.max(0, ((start - current) / (start - target)) * 100));
+      return { pct, done: current <= target, label: `±${current.toFixed(1)} → ±${target.toFixed(1)} strokes` };
+    }
+    if (goal.type === "putting") {
+      const target = parseFloat(goal.target);
+      const start = goal.startPutts ?? stats?.avgPuttsPerRound;
+      const current = stats?.avgPuttsPerRound;
+      if (start == null || current == null || isNaN(target)) {
+        return { pct: 0, done: false, label: current != null ? `${current.toFixed(1)} putts/round` : "Log a few rounds with putts recorded" };
+      }
+      if (start === target) return { pct: current <= target ? 100 : 0, done: current <= target, label: `${current.toFixed(1)} → ${target.toFixed(1)}` };
+      const pct = Math.min(100, Math.max(0, ((start - current) / (start - target)) * 100));
+      return { pct, done: current <= target, label: `${current.toFixed(1)} → ${target.toFixed(1)} putts/round` };
+    }
+    if (goal.type === "shortgame") {
+      const target = parseFloat(goal.target);
+      const start = goal.startShortGameGap ?? ((stats?.avgPuttsOffGIR != null && stats?.avgPuttsGIR != null) ? stats.avgPuttsOffGIR - stats.avgPuttsGIR : null);
+      const current = (stats?.avgPuttsOffGIR != null && stats?.avgPuttsGIR != null) ? stats.avgPuttsOffGIR - stats.avgPuttsGIR : null;
+      if (start == null || current == null || isNaN(target)) {
+        return { pct: 0, done: false, label: current != null ? `+${current.toFixed(1)} putts when missing greens` : "Log a few rounds with GIR and putts recorded" };
+      }
+      if (start === target) return { pct: current <= target ? 100 : 0, done: current <= target, label: `+${current.toFixed(1)} → +${target.toFixed(1)}` };
+      const pct = Math.min(100, Math.max(0, ((start - current) / (start - target)) * 100));
+      return { pct, done: current <= target, label: `+${current.toFixed(1)} → +${target.toFixed(1)} putts` };
+    }
+    if (goal.type === "bunker") {
+      // No bunker data is tracked, so there's no honest percentage to show
+      // — surface that plainly rather than displaying a fabricated number.
+      return { pct: null, done: false, label: "Not tracked from scorecards yet" };
+    }
+    if (goal.type === "approach") {
+      const target = parseFloat(goal.target);
+      const current = stats?.girRate != null ? stats.girRate * 100 : null;
+      if (current == null || isNaN(target) || target === 0) return { pct: 0, done: false, label: current != null ? `${Math.round(current)}% GIR` : "No rounds yet" };
       const pct = Math.min(100, (current / target) * 100);
-      return { pct, done: current >= target, label: `${current}y / ${target}y` };
+      return { pct, done: current >= target, label: `${Math.round(current)}% / ${Math.round(target)}% GIR` };
     }
     return { pct: 0, done: goal.completed, label: goal.target || "" };
   };
@@ -4646,8 +4899,9 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
           {goals.map(goal => {
             const progress = goalProgress(goal);
             const advice = buildGoalAdvice(goal, user, stats);
-            const typeInfo = GOAL_TYPES.find(t => t.id === goal.type) || GOAL_TYPES[3];
+            const typeInfo = GOAL_TYPES.find(t => t.id === goal.type) || GOAL_TYPES[0];
             const days = daysUntil(goal.dueDate);
+            const hasProgressMetric = progress.pct != null;
             return (
               <div key={goal.id}>
                 <div className={`goal-card ${progress.done?"done":""}`}>
@@ -4663,18 +4917,75 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
                     </div>
                     <button className="goal-delete" onClick={() => deleteGoal(goal.id)}><Icon.Trash /></button>
                   </div>
-                  <div className="goal-progress-track"><div className={`goal-progress-fill ${progress.done?"done":""}`} style={{ width: `${progress.pct}%` }} /></div>
-                  <div className="goal-stat-row">
-                    <span>{progress.label}</span>
-                    <span>{progress.done ? "Goal reached" : `${Math.round(progress.pct)}%`}</span>
-                  </div>
+                  {goal.type === "distance" ? (
+                    <div style={{ marginTop: 10 }}>
+                      {progress.perClub.length === 0 ? (
+                        <div className="goal-stat-row"><span>Add clubs to The Bag to track this goal</span></div>
+                      ) : (
+                        <>
+                          <div className="goal-stat-row" style={{ marginBottom: 8 }}><span>{progress.label}</span></div>
+                          {progress.perClub.map(c => (
+                            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                              <div style={{ width: 70, fontSize: 10.5, fontWeight: 700, color: C.black, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.category}</div>
+                              <div style={{ flex: 1, height: 14, background: C.cloud, borderRadius: 8, overflow: "hidden" }}>
+                                {c.trackable && (
+                                  <div style={{ height: "100%", borderRadius: 8, background: c.done ? "#1B7A3D" : C.black, width: `${Math.max(c.pct, c.pct > 0 ? 4 : 0)}%`, transition: "width .3s ease" }} />
+                                )}
+                              </div>
+                              <div style={{ width: 56, textAlign: "right", fontSize: 10.5, fontWeight: 800, color: !c.trackable ? C.ash : c.gain > 0 ? "#1B7A3D" : c.gain < 0 ? C.red : C.steel, flexShrink: 0 }}>
+                                {c.trackable ? `${c.gain > 0 ? "+" : ""}${c.gain}y` : "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  ) : hasProgressMetric ? (
+                    <>
+                      <div className="goal-progress-track"><div className={`goal-progress-fill ${progress.done?"done":""}`} style={{ width: `${progress.pct}%` }} /></div>
+                      <div className="goal-stat-row">
+                        <span>{progress.label}</span>
+                        <span>{progress.done ? "Goal reached" : `${Math.round(progress.pct)}%`}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="goal-stat-row" style={{ marginTop: 8 }}>
+                      <span>{progress.label}</span>
+                    </div>
+                  )}
                 </div>
 
                 {advice && (
                   <div className="advice-card">
                     <div className="advice-tag">{advice.tag} · AI Advice</div>
                     <div className="advice-title">{advice.title}</div>
-                    <div className="advice-body">{advice.body}</div>
+                    <div className="advice-body">{advice.insight}</div>
+                    {(advice.drill || advice.gymTip) && (
+                      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,.14)", position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                        {advice.drill && (
+                          <div style={{ display: "flex", gap: 10 }}>
+                            <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(255,255,255,.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <div style={{ width: 11, height: 11, color: C.white }}><Icon.Range /></div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 3 }}>At The Range</div>
+                              <div style={{ fontSize: 12, color: "rgba(255,255,255,.78)", lineHeight: 1.55 }}>{advice.drill}</div>
+                            </div>
+                          </div>
+                        )}
+                        {advice.gymTip && (
+                          <div style={{ display: "flex", gap: 10 }}>
+                            <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(255,255,255,.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <div style={{ width: 11, height: 11, color: C.white }}><Icon.Spark /></div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 3 }}>In The Gym</div>
+                              <div style={{ fontSize: 12, color: "rgba(255,255,255,.78)", lineHeight: 1.55 }}>{advice.gymTip}</div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -4693,7 +5004,15 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
               <label className="field-label">Goal Type</label>
               <div className="goal-type-grid">
                 {GOAL_TYPES.map(t => (
-                  <div key={t.id} className={`goal-type-pill ${form.type===t.id?"on":""}`} onClick={() => setForm({ ...form, type: t.id, title: form.title || defaultTitle(t.id) })}>
+                  <div key={t.id} className={`goal-type-pill ${form.type===t.id?"on":""}`} onClick={() => {
+                    // Auto-populate the title to match the newly selected
+                    // type — but only overwrite it if the current title is
+                    // empty or still matches a PREVIOUS type's default. If
+                    // the person has typed their own custom title, switching
+                    // type shouldn't silently wipe it out.
+                    const isUntouched = !form.title || GOAL_TYPES.some(gt => defaultTitle(gt.id) === form.title);
+                    setForm({ ...form, type: t.id, title: isUntouched ? defaultTitle(t.id) : form.title });
+                  }}>
                     <div className="goal-type-icon">{t.icon}</div>
                     <div className="goal-type-name">{t.label}</div>
                   </div>
@@ -4706,22 +5025,38 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
               <input className="input" placeholder={defaultTitle(form.type) || "e.g. Break 90 this season"} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
             </div>
 
-            {form.type !== "custom" && (
+            {form.type === "bunker" && (
               <div className="field">
-                <label className="field-label">
-                  {form.type === "handicap" ? "Target Handicap" : form.type === "birdies" ? "Target Birdies per Round" : "Target Driver Yardage"}
-                </label>
-                <input className="input" type="number" step={form.type === "handicap" ? "0.1" : "1"}
-                  placeholder={form.type === "handicap" ? "e.g. 12.0" : form.type === "birdies" ? "e.g. 2" : "e.g. 260"}
-                  value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} />
+                <p style={{ fontSize: 12, color: C.steel, lineHeight: 1.6 }}>
+                  Bunker shots aren't tracked on your scorecards yet, so there's no number to set a target against — this goal will show general fundamentals and drills instead of a % progress bar.
+                </p>
               </div>
             )}
-            {form.type === "custom" && (
-              <div className="field">
-                <label className="field-label">Target / Notes <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>— optional</span></label>
-                <input className="input" placeholder="e.g. Play 20 rounds this year" value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} />
-              </div>
-            )}
+
+            {form.type !== "bunker" && (() => {
+              const TARGET_CONFIG = {
+                handicap:    { label: "Target Handicap", step: "0.1", placeholder: "e.g. 12.0" },
+                birdies:     { label: "Target Birdies per Round", step: "1", placeholder: "e.g. 2" },
+                distance:    { label: "Target Yardage Increase", step: "1", placeholder: "e.g. 15", note: "How many extra yards you want to gain, on any club. After saving, head to The Bag and update yardages as you notice real gains at the range — each club tracks its own progress toward this target independently." },
+                consistency: { label: "Target Spread (± strokes)", step: "0.1", placeholder: "e.g. 5.0", note: "How tightly you want your scores clustered, in strokes relative to par. A smaller number means more consistent round to round." },
+                putting:     { label: "Target Putts per Round", step: "0.5", placeholder: "e.g. 32" },
+                shortgame:   { label: "Target Extra Putts When Missing Greens", step: "0.1", placeholder: "e.g. 0.3", note: "How close to your on-green putting average you want to get when you miss a green. 0 would mean no difference at all." },
+                approach:    { label: "Target Greens in Regulation %", step: "1", placeholder: "e.g. 50" },
+              };
+              const cfg = TARGET_CONFIG[form.type];
+              if (!cfg) return null;
+              return (
+                <div className="field">
+                  <label className="field-label">{cfg.label}</label>
+                  <input className="input" type="number" step={cfg.step}
+                    placeholder={cfg.placeholder}
+                    value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} />
+                  {cfg.note && (
+                    <p style={{ fontSize: 10.5, color: C.steel, marginTop: 6, lineHeight: 1.5 }}>{cfg.note}</p>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="field">
               <label className="field-label">Due Date <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>— optional</span></label>
