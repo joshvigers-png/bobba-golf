@@ -4420,11 +4420,34 @@ function RoundSummaryStrip({ round, user }) {
   const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
   const coursePar = round.coursePar ?? (course ? course.holes.reduce((s,h)=>s+h.par,0) : null);
   const toPar = coursePar != null && round.totalGross ? round.totalGross - coursePar : null;
+  const { value: hcpPlayed } = getHcpPlayed(round, user);
 
-  // Some older rounds (submitted before this field existed) have no
-  // handicapPlayed stored — getHcpPlayed reconstructs an estimate from
-  // handicapHistory in that case.
-  const { value: hcpPlayed, estimated } = getHcpPlayed(round, user);
+  // RAG helpers — only colour when we have enough data to make a
+  // meaningful comparison, otherwise fall back to neutral black.
+  const strokesColor = (() => {
+    if (!round.totalGross || !coursePar || hcpPlayed == null) return C.black;
+    const target = coursePar + hcpPlayed;
+    const over = round.totalGross - target;
+    if (over <= 0) return "#1B7A3D";         // at or under personal target
+    if (over <= 5) return "#E08A1E";          // up to 5 over — amber
+    return "#C8392D";                          // 6+ over — red
+  })();
+
+  const pointsColor = (() => {
+    const pts = round.totalPts;
+    if (pts == null) return C.black;
+    if (pts >= 36) return "#1B7A3D";           // at or above expected
+    if (pts >= 30) return "#E08A1E";           // 30–35 — amber
+    return "#C8392D";                           // below 30 — red
+  })();
+
+  const playedToColor = (() => {
+    if (round.differential == null || hcpPlayed == null) return C.black;
+    const diff = round.differential - hcpPlayed;
+    if (diff <= 0) return "#1B7A3D";           // played to handicap or better
+    if (diff <= 5) return "#E08A1E";           // within 5 — amber
+    return "#C8392D";                           // more than 5 worse — red
+  })();
 
   return (
     <div className="round-summary-grid">
@@ -4433,11 +4456,11 @@ function RoundSummaryStrip({ round, user }) {
         <div className="round-summary-lbl">Course Par</div>
       </div>
       <div className="round-summary-item">
-        <div className="round-summary-val">{round.totalGross || "—"}</div>
+        <div className="round-summary-val" style={{ color: strokesColor }}>{round.totalGross || "—"}</div>
         <div className="round-summary-lbl">Strokes</div>
       </div>
       <div className="round-summary-item">
-        <div className="round-summary-val">{round.totalPts ?? "—"}</div>
+        <div className="round-summary-val" style={{ color: pointsColor }}>{round.totalPts ?? "—"}</div>
         <div className="round-summary-lbl">Points</div>
       </div>
       <div className="round-summary-item">
@@ -4447,7 +4470,7 @@ function RoundSummaryStrip({ round, user }) {
         <div className="round-summary-lbl">To Par</div>
       </div>
       <div className="round-summary-item">
-        <div className="round-summary-val">{round.differential != null ? round.differential.toFixed(1) : "—"}</div>
+        <div className="round-summary-val" style={{ color: playedToColor }}>{round.differential != null ? round.differential.toFixed(1) : "—"}</div>
         <div className="round-summary-lbl">Played To</div>
       </div>
     </div>
