@@ -628,7 +628,7 @@ const css = `
   .goal-title{font-weight:800;font-size:14.5px;color:${C.black};}
   .goal-meta{font-size:11px;color:${C.steel};margin-top:2px;}
   .goal-progress-track{height:6px;background:${C.cloud};border-radius:4px;overflow:hidden;margin-top:4px;}
-  .goal-progress-fill{height:100%;background:${C.black};border-radius:4px;transition:width .4s ease;}
+  .goal-progress-fill{height:100%;background:#1B7A3D;border-radius:4px;transition:width .4s ease;}
   .goal-progress-fill.done{background:#1B7A3D;}
   .goal-stat-row{display:flex;justify-content:space-between;margin-top:8px;}
   .goal-stat-row span{font-size:10.5px;color:${C.steel};font-weight:700;}
@@ -5085,7 +5085,9 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
                       <div className="goal-progress-track"><div className={`goal-progress-fill ${progress.done?"done":""}`} style={{ width: `${progress.pct}%` }} /></div>
                       <div className="goal-stat-row">
                         <span>{progress.label}</span>
-                        <span>{progress.done ? "Goal reached" : `${Math.round(progress.pct)}%`}</span>
+                        <span style={{ fontWeight: 800, color: progress.done ? "#1B7A3D" : progress.pct >= 67 ? "#1B7A3D" : progress.pct >= 34 ? "#E08A1E" : "#C8392D" }}>
+                          {progress.done ? "Goal reached" : `${Math.round(progress.pct)}%`}
+                        </span>
                       </div>
                     </>
                   ) : (
