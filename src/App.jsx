@@ -4403,39 +4403,28 @@ function NewPlayPostSheet({ user, onClose }) {
 }
 
 // ─── Shared: condensed round summary strip (Course Par, Strokes, Points, +/-, HCP) ──
+// Returns the handicap index played on a specific round, plus a flag
+// indicating whether it was directly recorded or estimated from history.
+function getHcpPlayed(round, user) {
+  if (round.handicapPlayed != null) return { value: round.handicapPlayed, estimated: false };
+  if (!user?.handicapHistory?.length) return { value: null, estimated: false };
+  const sortedHistory = [...user.handicapHistory].sort((a,b) => new Date(a.date) - new Date(b.date));
+  const idx = sortedHistory.findIndex(h => h.roundId === round.id);
+  if (idx > 0) return { value: sortedHistory[idx - 1].value, estimated: true };
+  if (idx === 0) return { value: sortedHistory[0].value, estimated: true };
+  if (sortedHistory.length) return { value: sortedHistory[0].value, estimated: true };
+  return { value: null, estimated: false };
+}
+
 function RoundSummaryStrip({ round, user }) {
   const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
   const coursePar = round.coursePar ?? (course ? course.holes.reduce((s,h)=>s+h.par,0) : null);
   const toPar = coursePar != null && round.totalGross ? round.totalGross - coursePar : null;
 
   // Some older rounds (submitted before this field existed) have no
-  // handicapPlayed stored. Reconstruct it from handicapHistory: find the
-  // entry recorded for this exact round, then take the value that was
-  // current *before* it (since a history entry stores the handicap that
-  // RESULTED from that round, not the one played going into it).
-  let hcpPlayed = round.handicapPlayed;
-  let estimated = false;
-  if (hcpPlayed == null && user?.handicapHistory?.length) {
-    const sortedHistory = [...user.handicapHistory].sort((a,b) => new Date(a.date) - new Date(b.date));
-    const idx = sortedHistory.findIndex(h => h.roundId === round.id);
-    if (idx > 0) {
-      // Use the handicap that was current BEFORE this round (the value this
-      // round resulted in is recorded one entry later)
-      hcpPlayed = sortedHistory[idx - 1].value;
-      estimated = true;
-    } else if (idx === 0) {
-      // This round is the very first handicap update on record — there's no
-      // earlier value to fall back to, so use the result of this round itself
-      // as the closest available estimate.
-      hcpPlayed = sortedHistory[0].value;
-      estimated = true;
-    } else if (sortedHistory.length) {
-      // No exact match at all (predates history tracking entirely) — fall
-      // back to the earliest known handicap as a rough estimate.
-      hcpPlayed = sortedHistory[0].value;
-      estimated = true;
-    }
-  }
+  // handicapPlayed stored — getHcpPlayed reconstructs an estimate from
+  // handicapHistory in that case.
+  const { value: hcpPlayed, estimated } = getHcpPlayed(round, user);
 
   return (
     <div className="round-summary-grid">
@@ -4458,10 +4447,8 @@ function RoundSummaryStrip({ round, user }) {
         <div className="round-summary-lbl">To Par</div>
       </div>
       <div className="round-summary-item">
-        <div className="round-summary-val">
-          {hcpPlayed != null ? `${hcpPlayed.toFixed(1)}${estimated ? "*" : ""}` : "—"}
-        </div>
-        <div className="round-summary-lbl">HCP Played</div>
+        <div className="round-summary-val">{round.differential != null ? round.differential.toFixed(1) : "—"}</div>
+        <div className="round-summary-lbl">Played To</div>
       </div>
     </div>
   );
@@ -4509,25 +4496,33 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
     setDeleteTarget(null);
   };
 
-  const RoundCard = ({ r }) => (
-    <div className="course-row" style={{ alignItems: "flex-start", flexDirection: "column", cursor: "default" }}>
-      <div style={{ display: "flex", width: "100%", alignItems: "flex-start" }}>
-        <div style={{ flex: 1, cursor: "pointer" }} onClick={() => onReviewRound(r)}>
-          <div className="course-name">{r.courseName}</div>
-          <div className="course-loc">{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} · {r.holesPlayed} holes</div>
+  const RoundCard = ({ r }) => {
+    const { value: hcpPlayed, estimated } = getHcpPlayed(r, user);
+    return (
+      <div className="course-row" style={{ alignItems: "flex-start", flexDirection: "column", cursor: "default" }}>
+        <div style={{ display: "flex", width: "100%", alignItems: "flex-start" }}>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => onReviewRound(r)}>
+            <div className="course-name">{r.courseName}</div>
+            <div className="course-loc">{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} · {r.holesPlayed} holes</div>
+            {hcpPlayed != null && (
+              <div className="course-loc" style={{ marginTop: 1 }}>
+                HCP Played · {hcpPlayed.toFixed(1)}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <button onClick={() => onReviewRound(r)} style={{ width: 32, height: 32, borderRadius: "50%", background: C.cloud, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <div style={{ width: 14, height: 14, color: C.black }}><Icon.Edit /></div>
+            </button>
+            <button onClick={() => setDeleteTarget(r)} style={{ width: 32, height: 32, borderRadius: "50%", background: "#FCE9E7", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <div style={{ width: 14, height: 14, color: C.red }}><Icon.Trash /></div>
+            </button>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          <button onClick={() => onReviewRound(r)} style={{ width: 32, height: 32, borderRadius: "50%", background: C.cloud, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            <div style={{ width: 14, height: 14, color: C.black }}><Icon.Edit /></div>
-          </button>
-          <button onClick={() => setDeleteTarget(r)} style={{ width: 32, height: 32, borderRadius: "50%", background: "#FCE9E7", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            <div style={{ width: 14, height: 14, color: C.red }}><Icon.Trash /></div>
-          </button>
-        </div>
+        <div style={{ width: "100%", cursor: "pointer" }} onClick={() => onReviewRound(r)}><RoundSummaryStrip round={r} user={user} /></div>
       </div>
-      <div style={{ width: "100%", cursor: "pointer" }} onClick={() => onReviewRound(r)}><RoundSummaryStrip round={r} user={user} /></div>
-    </div>
-  );
+    );
+  };
 
   if (allRounds.length === 0) {
     return (
@@ -4591,9 +4586,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
         </>
       )}
 
-      <p style={{ fontSize: 10.5, color: C.ash, textAlign: "center", padding: "4px 24px 20px", lineHeight: 1.5 }}>
-        * Handicap played is estimated from your index history for rounds logged before this was tracked directly.
-      </p>
+      
 
       {deleteTarget && (
         <div className="sheet-overlay" onClick={() => setDeleteTarget(null)}>
