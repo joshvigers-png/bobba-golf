@@ -445,8 +445,8 @@ const css = `
   /* ── Y/N toggle pair ── */
   .yn-pair{display:flex;border:1.5px solid ${C.line};border-radius:1px;overflow:hidden;}
   .yn-btn{flex:1;padding:9px 0;text-align:center;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;background:${C.white};color:${C.steel};transition:all .15s;}
-  .yn-btn.on-yes{background:${C.black};color:${C.white};}
-  .yn-btn.on-no{background:${C.mist};color:${C.steel};}
+  .yn-btn.on-yes{background:#1B7A3D;color:${C.white};}
+  .yn-btn.on-no{background:#C8392D;color:${C.white};}
   .yn-btn:first-child{border-right:1.5px solid ${C.line};}
 
   /* ── Official scorecard hole row ── */
@@ -2541,7 +2541,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
             <label className="hole-field-label">Lost Balls</label>
             <div className="stepper">
               <button className="stepper-btn" onClick={() => updateHole(h.n, "lost", Math.max(0,(parseInt(s.lost)||1)-1))}><Icon.Minus /></button>
-              <div className="stepper-val">{s.lost ?? 0}</div>
+              <div className="stepper-val" style={{ color: (parseInt(s.lost)||0) > 0 ? "#C8392D" : C.black }}>{s.lost ?? 0}</div>
               <button className="stepper-btn" onClick={() => updateHole(h.n, "lost", (parseInt(s.lost)||0)+1)}><Icon.Plus /></button>
             </div>
           </div>
@@ -2749,7 +2749,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
             <label className="hole-field-label">Lost Balls</label>
             <div className="stepper">
               <button className="stepper-btn" onClick={() => updateHole(h.n, "lost", Math.max(0,(parseInt(s.lost)||1)-1))}><Icon.Minus /></button>
-              <div className="stepper-val">{s.lost ?? 0}</div>
+              <div className="stepper-val" style={{ color: (parseInt(s.lost)||0) > 0 ? "#C8392D" : C.black }}>{s.lost ?? 0}</div>
               <button className="stepper-btn" onClick={() => updateHole(h.n, "lost", (parseInt(s.lost)||0)+1)}><Icon.Plus /></button>
             </div>
           </div>
