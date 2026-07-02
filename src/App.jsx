@@ -4572,9 +4572,27 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
         <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
-        <div className="page-head-eyebrow">Your Rounds</div>
-        <h1>History</h1>
-        <p>{allRounds.length} round{allRounds.length!==1?"s":""} logged</p>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">Your Rounds</div>
+          <h1>History</h1>
+          <p>{allRounds.length} round{allRounds.length!==1?"s":""} logged</p>
+        </div>
+        <div style={{ position: "relative", zIndex: 1, marginTop: 16, background: "rgba(255,255,255,.7)", border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: C.steel, marginBottom: 8 }}>Score Key</div>
+          <div style={{ display: "flex", gap: 18 }}>
+            {[
+              { color: "#1B7A3D", label: "On target or better" },
+              { color: "#E08A1E", label: "Slightly off" },
+              { color: "#C8392D", label: "Needs work" },
+            ].map(({ color, label }) => (
+              <div key={color} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>{label}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 7, fontSize: 8.5, color: C.ash }}>Strokes vs par + HCP · Points vs 36 · Played To vs your HCP</div>
+        </div>
       </div>
 
       <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">Most Recent</span></div>
