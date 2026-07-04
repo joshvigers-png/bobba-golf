@@ -1413,6 +1413,8 @@ function buildLastRoundBriefing(user, round) {
     firMisses, firTotal,
     girMisses, girTotal,
     threePutts, puttedHoles,
+    hcpPlayed: getHcpPlayed(round, user).value,
+    differential: round.differential ?? null,
     focus,
   };
 }
@@ -1465,9 +1467,23 @@ function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose, onOpenBa
   }
 
   if (!briefing) return null;
-  const { courseName, date, totalGross, totalPts, par, lostBalls, firMisses, firTotal, girMisses, girTotal, threePutts, puttedHoles, focus } = briefing;
+  const { courseName, date, totalGross, totalPts, par, lostBalls, firMisses, firTotal, girMisses, girTotal, threePutts, puttedHoles, focus, hcpPlayed, differential } = briefing;
   const toPar = par != null && totalGross ? totalGross - par : null;
   const dateLabel = new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+
+  const strokesColor = (() => {
+    if (!totalGross || !par || hcpPlayed == null) return C.black;
+    const over = totalGross - (par + hcpPlayed);
+    if (over <= 0) return "#1B7A3D";
+    if (over <= 5) return "#E08A1E";
+    return "#C8392D";
+  })();
+  const pointsColor = (() => {
+    if (totalPts == null) return C.black;
+    if (totalPts >= 36) return "#1B7A3D";
+    if (totalPts >= 30) return "#E08A1E";
+    return "#C8392D";
+  })();
 
   return (
     <div className="sheet-overlay" onClick={onClose}>
@@ -1479,11 +1495,11 @@ function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose, onOpenBa
 
         <div className="round-summary-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 18, paddingBottom: 18, borderBottom: `1px solid ${C.line}` }}>
           <div className="round-summary-item">
-            <div className="round-summary-val">{totalGross || "—"}</div>
+            <div className="round-summary-val" style={{ color: strokesColor }}>{totalGross || "—"}</div>
             <div className="round-summary-lbl">Strokes</div>
           </div>
           <div className="round-summary-item">
-            <div className="round-summary-val">{totalPts ?? "—"}</div>
+            <div className="round-summary-val" style={{ color: pointsColor }}>{totalPts ?? "—"}</div>
             <div className="round-summary-lbl">Points</div>
           </div>
           <div className="round-summary-item">
@@ -1493,7 +1509,7 @@ function LastRoundBriefingModal({ user, briefing, hasNoRounds, onClose, onOpenBa
             <div className="round-summary-lbl">To Par</div>
           </div>
           <div className="round-summary-item">
-            <div className="round-summary-val">{lostBalls}</div>
+            <div className="round-summary-val" style={{ color: lostBalls > 0 ? "#C8392D" : C.black }}>{lostBalls}</div>
             <div className="round-summary-lbl">Lost Balls</div>
           </div>
         </div>
