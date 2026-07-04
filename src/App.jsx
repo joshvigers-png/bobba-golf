@@ -4543,6 +4543,36 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
           </div>
         </div>
         <div style={{ width: "100%", cursor: "pointer" }} onClick={() => onReviewRound(r)}><RoundSummaryStrip round={r} user={user} /></div>
+        {(() => {
+          const course = r.course || COURSE_DB.find(c => c.id === r.courseId);
+          if (!course || !r.scores) return null;
+          let firHit = 0, firTotal = 0, girHit = 0, girTotal = 0;
+          course.holes.forEach(h => {
+            const s = r.scores[h.n];
+            if (!s?.strokes) return;
+            if (h.par >= 4 && s.fir != null) { firTotal++; if (s.fir) firHit++; }
+            if (s.gir != null) { girTotal++; if (s.gir) girHit++; }
+          });
+          const putts = r.totalPutts || 0;
+          const lost = r.totalLost || 0;
+          const stats = [
+            firTotal > 0 && { label: "FIR", value: `${firHit}/${firTotal}` },
+            girTotal > 0 && { label: "GIR", value: `${girHit}/${girTotal}` },
+            putts > 0 && { label: "Putts", value: putts },
+            { label: "Lost Balls", value: lost },
+          ].filter(Boolean);
+          if (!stats.length) return null;
+          return (
+            <div style={{ width: "100%", display: "flex", gap: 0, borderTop: `1px solid ${C.line}`, marginTop: 10, paddingTop: 10 }}>
+              {stats.map((s, i) => (
+                <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                  <div className="round-summary-val" style={{ color: C.black }}>{s.value}</div>
+                  <div className="round-summary-lbl">{s.label}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     );
   };
