@@ -1778,6 +1778,35 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
             </button>
           </div>
         </div>
+        {(() => {
+          const hcp = user.handicap;
+          const bag = user.bag || [];
+          const clubCount = bag.length;
+          const bagSpace = 14 - clubCount;
+          const goals = LS.get(`bb_goals_${user.id}`) || [];
+          const rating = hcp == null ? null
+            : hcp <= 0 ? "Scratch" : hcp <= 5 ? "Elite" : hcp <= 12 ? "Competitive"
+            : hcp <= 20 ? "Improving" : hcp <= 28 ? "Club Golfer" : "Beginner";
+          const bullets = [
+            rating && hcp != null && `Player Rating: ${rating}`,
+            bagSpace > 0 && clubCount > 0 && `Room for ${bagSpace} more club${bagSpace !== 1 ? "s" : ""} in the bag`,
+            clubCount === 0 && "Add your clubs to unlock better advice",
+            rounds.length === 0 && "Submit your first round to get started",
+            goals.length === 0 && rounds.length > 0 && "No goals set — try Goals & Training",
+            goals.length > 0 && `${goals.length} active goal${goals.length !== 1 ? "s" : ""} in progress`,
+          ].filter(Boolean);
+          if (!bullets.length) return null;
+          return (
+            <div className="advice-card" style={{ margin: "14px 0 0", padding: "14px 16px", position: "relative", zIndex: 1 }}>
+              {bullets.map((b, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: i < bullets.length - 1 ? 6 : 0 }}>
+                  <div style={{ width: 4, height: 4, borderRadius: "50%", background: "rgba(255,255,255,.4)", flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: C.white, fontWeight: 600, lineHeight: 1.4 }}>{b}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Quick stat strip — floats up over header */}
