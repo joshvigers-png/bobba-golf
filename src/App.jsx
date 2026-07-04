@@ -1785,19 +1785,40 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
           const bagSpace = 14 - clubCount;
           const goals = LS.get(`bb_goals_${user.id}`) || [];
           const rating = hcp == null ? null
-            : hcp <= 0 ? "Scratch" : hcp <= 5 ? "Elite" : hcp <= 12 ? "Competitive"
-            : hcp <= 20 ? "Improving" : hcp <= 28 ? "Club Golfer" : "Beginner";
+            : hcp <= 0 ? "Scratch"
+            : hcp <= 10 ? "Competitive"
+            : hcp <= 27 ? "Amateur"
+            : "Rookie";
           const bullets = [
-            rating && hcp != null && `Player Rating: ${rating}`,
             bagSpace > 0 && clubCount > 0 && `Room for ${bagSpace} more club${bagSpace !== 1 ? "s" : ""} in the bag`,
             clubCount === 0 && "Add your clubs to unlock better advice",
             rounds.length === 0 && "Submit your first round to get started",
             goals.length === 0 && rounds.length > 0 && "No goals set — try Goals & Training",
             goals.length > 0 && `${goals.length} active goal${goals.length !== 1 ? "s" : ""} in progress`,
           ].filter(Boolean);
-          if (!bullets.length) return null;
+          if (!bullets.length && !rating) return null;
+          const ALL_RATINGS = ["Rookie", "Amateur", "Competitive", "Scratch"];
           return (
             <div className="advice-card" style={{ margin: "14px 0 0", padding: "14px 16px", position: "relative", zIndex: 1 }}>
+              {rating && (
+                <div style={{ marginBottom: bullets.length ? 12 : 0 }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.45)", marginBottom: 8 }}>Current Player Rating</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {ALL_RATINGS.map(r => {
+                      const active = r === rating;
+                      return (
+                        <div key={r} style={{
+                          flex: 1, textAlign: "center", padding: "5px 4px",
+                          borderRadius: 4, fontSize: 10, fontWeight: 800,
+                          background: active ? "#1B7A3D" : "rgba(255,255,255,.1)",
+                          color: active ? C.white : "rgba(255,255,255,.4)",
+                          border: active ? "none" : "1px solid rgba(255,255,255,.12)",
+                        }}>{r}</div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {bullets.map((b, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: i < bullets.length - 1 ? 6 : 0 }}>
                   <div style={{ width: 4, height: 4, borderRadius: "50%", background: "rgba(255,255,255,.4)", flexShrink: 0 }} />
