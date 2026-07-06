@@ -2467,13 +2467,198 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
             <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
           </div>
         ))}
-        {!searching && !loadingCourse && courses.length === 0 && (
+        {!searching && !loadingCourse && courses.length === 0 && query.trim().length > 1 && (
           <div className="empty">
             <div className="empty-icon"><Icon.Pin /></div>
             <div className="empty-title">No courses found</div>
-            <div className="empty-sub">Try a different search term.</div>
+            <div className="empty-sub">Can't find your course? Scan your scorecard and we'll set it up for you.</div>
+            <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setStep("scan")}>
+              Scan a Scorecard
+            </button>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ── Step: Scan scorecard ──
+  if (step === "scan") {
+    const [scanName, setScanName] = React.useState("");
+    const [scanImage, setScanImage] = React.useState(null);
+    const [scanPreview, setScanPreview] = React.useState(null);
+    const [scanning, setScanning] = React.useState(false);
+    const [scanError, setScanError] = React.useState("");
+    const [scanned, setScanned] = React.useState(null); // extracted course data
+    const fileRef = React.useRef(null);
+
+    const handleImage = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setScanImage(reader.result.split(",")[1]); // base64 only
+        setScanPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    };
+
+    const doScan = async () => {
+      if (!scanImage) { setScanError("Please take a photo of the scorecard first."); return; }
+      if (!scanName.trim()) { setScanError("Please enter the course name."); return; }
+      setScanError("");
+      setScanning(true);
+      try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 2000,
+            messages: [{
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/jpeg", data: scanImage }
+                },
+                {
+                  type: "text",
+                  text: `This is a golf scorecard. Extract the hole data and return ONLY a valid JSON object with no markdown, no explanation, just raw JSON in this exact format:
+{
+  "tees": [
+    { "name": "White", "rating": 70.0, "slope": 120 },
+    { "name": "Yellow", "rating": 68.5, "slope": 116 }
+  ],
+  "holes": [
+    { "n": 1, "par": 4, "si": 7, "yds": { "white": 420, "yellow": 398 } },
+    ...all 18 holes
+  ]
+}
+Rules:
+- Include all tee colours you can see (White, Yellow, Red, Blue etc)
+- If you cannot read a value clearly, use null
+- si = stroke index (the handicap column on the scorecard)
+- yds keys must be lowercase tee colour names matching the tees array names
+- Return all 18 holes even if some values are null
+- Return ONLY the JSON, nothing else`
+                }
+              ]
+            }]
+          })
+        });
+        const data = await res.json();
+        const text = data.content?.find(b => b.type === "text")?.text || "";
+        const clean = text.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(clean);
+        setScanned(parsed);
+      } catch (err) {
+        setScanError("Couldn't read the scorecard — try a clearer photo or better lighting.");
+      }
+      setScanning(false);
+    };
+
+    const confirmScan = () => {
+      if (!scanned) return;
+      // Build a course object matching the same shape as normalizeApiCourse
+      const teeKeys = scanned.tees.map(t => t.name.toLowerCase().replace(/[^a-z]/g, ""));
+      const tees = {};
+      scanned.tees.forEach((t, i) => {
+        const k = teeKeys[i];
+        tees[k] = { rating: t.rating, slope: t.slope };
+      });
+      const holes = scanned.holes.map(h => ({
+        n: h.n,
+        par: h.par ?? 4,
+        si: h.si ?? h.n,
+        yds: h.yds || {},
+      }));
+      const builtCourse = {
+        id: `scan_${Date.now()}`,
+        name: scanName.trim(),
+        location: "",
+        tees,
+        holes,
+        fromScan: true,
+      };
+      setCourse(builtCourse);
+      setStep("setup");
+    };
+
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <div className="page-head">
+          <button onClick={() => setStep("search")} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div className="page-head-eyebrow">Play a Round</div>
+          <h1>Scan Scorecard</h1>
+          <p style={{ marginTop: 4, position: "relative", zIndex: 1 }}>Take a photo of your physical scorecard and we'll extract the hole data automatically.</p>
+        </div>
+
+        <div style={{ padding: "0 18px" }}>
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label className="field-label">Course Name</label>
+            <input className="input" placeholder="e.g. Walsall Golf Club" value={scanName} onChange={e => setScanName(e.target.value)} />
+          </div>
+
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleImage} />
+
+          {scanPreview ? (
+            <div style={{ marginBottom: 16 }}>
+              <img src={scanPreview} alt="Scorecard" style={{ width: "100%", borderRadius: 4, border: `1px solid ${C.line}` }} />
+              <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={() => fileRef.current?.click()}>Retake Photo</button>
+            </div>
+          ) : (
+            <button
+              className="btn btn-outline"
+              style={{ width: "100%", marginBottom: 16, padding: "20px 0", fontSize: 14 }}
+              onClick={() => fileRef.current?.click()}
+            >
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 28, height: 28, color: C.steel }}><Icon.ModRound /></div>
+                <span>Take Photo of Scorecard</span>
+                <span style={{ fontSize: 11, color: C.steel }}>Lay it flat in good light for best results</span>
+              </div>
+            </button>
+          )}
+
+          {scanError && <p style={{ fontSize: 12, color: C.red, marginBottom: 12 }}>{scanError}</p>}
+
+          {!scanned && (
+            <button className="btn btn-primary" onClick={doScan} disabled={scanning || !scanImage}>
+              {scanning ? "Reading scorecard..." : "Extract Hole Data"}
+            </button>
+          )}
+
+          {scanned && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12 }}>Extracted Data — {scanned.holes.length} holes</div>
+              <div style={{ background: C.white, border: `1px solid ${C.line}`, marginBottom: 16, overflow: "hidden" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "32px 36px 36px auto", gap: 0, borderBottom: `1px solid ${C.line}`, padding: "8px 12px", background: C.cloud }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: C.steel }}>Hole</div>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: C.steel }}>Par</div>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: C.steel }}>SI</div>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: C.steel }}>Yardages</div>
+                </div>
+                {scanned.holes.map(h => (
+                  <div key={h.n} style={{ display: "grid", gridTemplateColumns: "32px 36px 36px auto", gap: 0, padding: "7px 12px", borderBottom: `1px solid ${C.line}`, fontSize: 12 }}>
+                    <div style={{ fontWeight: 800 }}>{h.n}</div>
+                    <div>{h.par ?? "—"}</div>
+                    <div style={{ color: h.si ? C.black : C.ash }}>{h.si ?? "—"}</div>
+                    <div style={{ color: C.steel, fontSize: 11 }}>
+                      {h.yds ? Object.entries(h.yds).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}y`).join(" · ") : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 11.5, color: C.steel, marginBottom: 14, lineHeight: 1.6 }}>Check the data looks right — you can still adjust stroke index hole by hole during the round.</p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => { setScanned(null); setScanImage(null); setScanPreview(null); }}>Rescan</button>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={confirmScan}>Looks Good — Continue</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
