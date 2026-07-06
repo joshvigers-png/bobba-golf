@@ -3327,6 +3327,19 @@ function HandicapChart({ points }) {
           <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>Increase</span>
         </div>
       </div>
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+        <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".07em", textTransform: "uppercase", color: C.ash, marginBottom: 7 }}>How your index builds over time</div>
+        {[
+          { rounds: "3–5 rounds", desc: "Index influenced by your single best round" },
+          { rounds: "8–10 rounds", desc: "More representative — best 2–4 differentials averaged" },
+          { rounds: "20 rounds", desc: "Full WHS picture — best 8 of your last 20" },
+        ].map(({ rounds, desc }) => (
+          <div key={rounds} style={{ display: "flex", gap: 8, marginBottom: 5, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 9.5, fontWeight: 800, color: C.black, minWidth: 70, flexShrink: 0 }}>{rounds}</div>
+            <div style={{ fontSize: 9.5, color: C.steel, lineHeight: 1.4 }}>{desc}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
