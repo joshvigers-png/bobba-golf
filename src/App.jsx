@@ -2601,7 +2601,7 @@ Rules:
             <input className="input" placeholder="e.g. Walsall Golf Club" value={scanName} onChange={e => setScanName(e.target.value)} />
           </div>
 
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleImage} />
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImage} />
 
           {scanPreview ? (
             <div style={{ marginBottom: 16 }}>
@@ -2616,8 +2616,8 @@ Rules:
             >
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
                 <div style={{ width: 28, height: 28, color: C.steel }}><Icon.ModRound /></div>
-                <span>Take Photo of Scorecard</span>
-                <span style={{ fontSize: 11, color: C.steel }}>Lay it flat in good light for best results</span>
+                <span>Select or Take a Photo</span>
+                <span style={{ fontSize: 11, color: C.steel }}>Choose from library or take a new photo</span>
               </div>
             </button>
           )}
