@@ -2606,20 +2606,22 @@ Rules:
           {scanPreview ? (
             <div style={{ marginBottom: 16 }}>
               <img src={scanPreview} alt="Scorecard" style={{ width: "100%", borderRadius: 4, border: `1px solid ${C.line}` }} />
-              <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={() => fileRef.current?.click()}>Retake Photo</button>
+              <label style={{ display: "block", marginTop: 10, textAlign: "center", padding: "12px 0", border: `1.5px solid ${C.line}`, fontWeight: 700, fontSize: 13, cursor: "pointer", borderRadius: 1 }}>
+                Retake Photo
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleImage} />
+              </label>
             </div>
           ) : (
-            <button
-              className="btn btn-outline"
-              style={{ width: "100%", marginBottom: 16, padding: "20px 0", fontSize: 14 }}
-              onClick={() => fileRef.current?.click()}
-            >
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, color: C.steel }}><Icon.ModRound /></div>
-                <span>Select or Take a Photo</span>
-                <span style={{ fontSize: 11, color: C.steel }}>Choose from library or take a new photo</span>
-              </div>
-            </button>
+            <label style={{
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              gap: 8, width: "100%", marginBottom: 16, padding: "24px 0", fontSize: 14, fontWeight: 700,
+              border: `1.5px solid ${C.line}`, borderRadius: 1, cursor: "pointer", background: C.white,
+            }}>
+              <div style={{ width: 28, height: 28, color: C.steel }}><Icon.ModRound /></div>
+              <span>Select or Take a Photo</span>
+              <span style={{ fontSize: 11, color: C.steel, fontWeight: 500 }}>Choose from library or take a new photo</span>
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleImage} />
+            </label>
           )}
 
           {scanError && <p style={{ fontSize: 12, color: C.red, marginBottom: 12 }}>{scanError}</p>}
