@@ -2703,10 +2703,11 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const HoleRow = ({ h }) => {
     const s = scores[h.n] || {};
     const gross = parseInt(s.strokes);
-    // displaySi: what the stepper shows — blank until the person has
-    // explicitly entered a value for THIS hole, regardless of whatever the
-    // course data (real or fake-fallback) might already contain.
-    const displaySi = s.si;
+    // displaySi: what the stepper shows. For scanned courses the SI is real
+    // (extracted from the physical scorecard) so we pre-fill it. For API
+    // courses it may be a fake sequential fallback so we keep it blank until
+    // the user explicitly enters it from their physical scorecard.
+    const displaySi = s.si ?? (course?.fromScan ? h.si : undefined);
     // effectiveSi: what's actually used for the Stableford calculation —
     // falls back to the course's stored SI so points still compute
     // sensibly even before the person has corrected it.
@@ -2918,7 +2919,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   const HoleRow = ({ h }) => {
     const s = scores[h.n] || {};
     const gross = parseInt(s.strokes);
-    const displaySi = s.si;
+    const displaySi = s.si ?? (course?.fromScan ? h.si : undefined);
     const effectiveSi = s.si ?? h.si;
     const pts = gross ? stablefordPts(gross, h.par, user.handicap || 0, effectiveSi) : null;
     const isPar45 = h.par >= 4;
