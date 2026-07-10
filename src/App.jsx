@@ -2159,13 +2159,15 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
 // called unconditionally at the top level — calling hooks inside an if block
 // inside a parent component violates the Rules of Hooks and crashes React,
 // which was causing the white screen when tapping "Scan a Scorecard".
-function ScanScorecardStep({ onBack, onConfirm, proxyUrl }) {
-  const [scanName, setScanName] = useState("");
+function ScanScorecardStep({ onBack, onConfirm, proxyUrl, existingCourse }) {
+  const [scanName, setScanName] = useState(existingCourse?.name || "");
   const [scanImage, setScanImage] = useState(null);
   const [scanPreview, setScanPreview] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
   const [scanned, setScanned] = useState(null);
+
+  const isImproving = !!existingCourse;
 
   const handleImage = (e) => {
     const file = e.target.files?.[0];
@@ -2242,14 +2244,20 @@ Rules:
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Play a Round</div>
-        <h1>Scan Scorecard</h1>
-        <p style={{ marginTop: 4, position: "relative", zIndex: 1 }}>Take a photo of your physical scorecard and we'll extract the hole data automatically.</p>
+        <h1>{isImproving ? "Improve Course Data" : "Scan Scorecard"}</h1>
+        <p style={{ marginTop: 4, position: "relative", zIndex: 1 }}>
+          {isImproving
+            ? `Scan the physical scorecard for ${existingCourse.name} to add stroke index and validate hole data.`
+            : "Take a photo of your physical scorecard and we'll extract the hole data automatically."}
+        </p>
       </div>
       <div style={{ padding: "0 18px" }}>
-        <div className="field" style={{ marginBottom: 16 }}>
-          <label className="field-label">Course Name</label>
-          <input className="input" placeholder="e.g. Walsall Golf Club" value={scanName} onChange={e => setScanName(e.target.value)} />
-        </div>
+        {!isImproving && (
+          <div className="field" style={{ marginBottom: 16 }}>
+            <label className="field-label">Course Name</label>
+            <input className="input" placeholder="e.g. Walsall Golf Club" value={scanName} onChange={e => setScanName(e.target.value)} />
+          </div>
+        )}
         {scanPreview ? (
           <div style={{ marginBottom: 16 }}>
             <img src={scanPreview} alt="Scorecard" style={{ width: "100%", borderRadius: 4, border: `1px solid ${C.line}` }} />
@@ -2291,7 +2299,7 @@ Rules:
             <p style={{ fontSize: 11.5, color: C.steel, marginBottom: 14, lineHeight: 1.6 }}>Check the data looks right — you can still adjust stroke index hole by hole during the round.</p>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => { setScanned(null); setScanImage(null); setScanPreview(null); }}>Rescan</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={confirmScan}>Looks Good — Continue</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={confirmScan}>{isImproving ? "Apply & Continue" : "Looks Good — Continue"}</button>
             </div>
           </div>
         )}
@@ -2302,12 +2310,13 @@ Rules:
 
 function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const savedActive = LS.get(`bb_active_round_${user.id}`);
-  const [step, setStep] = useState(savedActive ? "card" : "search"); // search | setup | card
+  const [step, setStep] = useState(savedActive ? "card" : "search"); // search | scan | setup | card
   const [query, setQuery] = useState("");
   const [course, setCourse] = useState(savedActive?.course || null);
   const [setup, setSetup] = useState(savedActive?.setup || { date: new Date().toISOString().slice(0,10), tee: "white", conditions: "Dry" });
   const [scores, setScores] = useState(savedActive?.scores || {});
   const [submittedRound, setSubmittedRound] = useState(null);
+  const [preScanCourse, setPreScanCourse] = useState(null); // API course being improved by scan
 
   // ── Live course search (via the secure proxy — see /home/claude/golf-proxy) ──
   // Note: GolfCourseAPI's search is name/club text-based only — it doesn't
@@ -2584,8 +2593,22 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           <h1>Find a Course</h1>
         </div>
 
-        <div style={{ padding: "18px 18px 0" }}>
-          <div className="field" style={{ position: "relative" }}>
+        <div style={{ padding: "0 18px 18px" }}>
+          {/* Scan as primary option */}
+          <div style={{ background: C.black, borderRadius: 1, padding: "14px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => setStep("scan")}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ width: 18, height: 18, color: C.white }}><Icon.ModRound /></div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.white }}>Scan a Scorecard</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 2 }}>Photo your physical scorecard — auto-populates all hole data including stroke index</div>
+            </div>
+            <div style={{ width: 14, height: 14, color: "rgba(255,255,255,.4)" }}><Icon.ChevronRight /></div>
+          </div>
+
+          {/* Search */}
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: C.steel, marginBottom: 8 }}>Or search the database</div>
+          <div className="field" style={{ position: "relative", marginBottom: 0 }}>
             <input className="input" placeholder="Search by course or club name…" value={query} onChange={e => setQuery(e.target.value)} style={{ paddingLeft: 38 }} autoFocus />
             <div style={{ position: "absolute", left: 13, top: 14, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
           </div>
@@ -2595,7 +2618,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           <p style={{ fontSize: 11.5, color: C.steel, textAlign: "center", padding: "0 24px 10px", lineHeight: 1.5 }}>{searchError}</p>
         )}
 
-        <div className="section-head" style={{ marginTop: 8 }}>
+        <div className="section-head" style={{ marginTop: 0 }}>
           <span className="section-title">{query.trim() ? "Search Results" : "All Courses"}</span>
         </div>
         {(searching || loadingCourse) && (
@@ -2604,23 +2627,29 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           </p>
         )}
         {!searching && !loadingCourse && courses.map(c => (
-          <div key={c.id} className="course-row" onClick={() => selectCourse(c)}>
-            <div className="course-icon-wrap"><Icon.Pin /></div>
-            <div style={{ flex: 1 }}>
-              <div className="course-name">{c.name}</div>
-              <div className="course-loc">{c.location}</div>
+          <div key={c.id} className="course-row" style={{ flexDirection: "column", alignItems: "stretch", cursor: "default" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "4px 0" }} onClick={() => selectCourse(c)}>
+              <div className="course-icon-wrap" style={{ background: "#2563EB" }}><Icon.Pin /></div>
+              <div style={{ flex: 1 }}>
+                <div className="course-name">{c.name}</div>
+                <div className="course-loc">{c.location}</div>
+              </div>
+              <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
             </div>
-            <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+            <button
+              onClick={() => { setPreScanCourse(c); setStep("scan"); }}
+              style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", borderTop: `1px solid ${C.line}`, padding: "10px 0 10px 44px", cursor: "pointer", marginTop: 8, width: "100%" }}
+            >
+              <div style={{ width: 12, height: 12, color: C.steel }}><Icon.ModRound /></div>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: C.steel }}>Scan scorecard to add stroke index & validate data</span>
+            </button>
           </div>
         ))}
         {!searching && !loadingCourse && courses.length === 0 && query.trim().length > 1 && (
           <div className="empty">
             <div className="empty-icon"><Icon.Pin /></div>
             <div className="empty-title">No courses found</div>
-            <div className="empty-sub">Can't find your course? Scan your scorecard and we'll set it up for you.</div>
-            <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setStep("scan")}>
-              Scan a Scorecard
-            </button>
+            <div className="empty-sub">Use the scan option above to set up your course from a physical scorecard.</div>
           </div>
         )}
       </div>
@@ -2631,9 +2660,33 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   if (step === "scan") {
     return (
       <ScanScorecardStep
-        onBack={() => setStep("search")}
+        onBack={() => { setPreScanCourse(null); setStep("search"); }}
         proxyUrl={COURSE_API_PROXY}
-        onConfirm={(builtCourse) => { setCourse(builtCourse); setStep("setup"); }}
+        existingCourse={preScanCourse}
+        onConfirm={(builtCourse) => {
+          if (preScanCourse) {
+            // Merge scanned SI and yardages into the existing API course —
+            // keep the API's rating/slope/location data, enrich with real
+            // hole-level data from the physical scorecard scan.
+            const merged = {
+              ...preScanCourse,
+              holes: preScanCourse.holes.map((h, i) => {
+                const scannedHole = builtCourse.holes.find(sh => sh.n === h.n) || builtCourse.holes[i];
+                return {
+                  ...h,
+                  si: scannedHole?.si ?? h.si,
+                  yds: scannedHole?.yds ? { ...h.yds, ...scannedHole.yds } : h.yds,
+                };
+              }),
+              fromScan: true,
+            };
+            setCourse(merged);
+          } else {
+            setCourse(builtCourse);
+          }
+          setPreScanCourse(null);
+          setStep("setup");
+        }}
       />
     );
   }
