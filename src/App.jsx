@@ -1920,6 +1920,9 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   });
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
@@ -2115,9 +2118,13 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
 
       <div className="section-head"><span className="section-title">Account</span></div>
       <div className="panel" style={{ padding: 0 }}>
-        {["Notifications", "Privacy", "Help & Support"].map((item, i) => (
-          <div key={item} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${C.line}`, cursor: "pointer" }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{item}</span>
+        {[
+          { label: "Notifications", action: () => setNotificationsOpen(true) },
+          { label: "Privacy", action: () => setPrivacyOpen(true) },
+          { label: "Help & Support", action: () => setHelpOpen(true) },
+        ].map(({ label, action }) => (
+          <div key={label} onClick={action} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${C.line}`, cursor: "pointer" }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</span>
             <div style={{ width: 15, height: 15, color: C.ash }}><Icon.ChevronRight /></div>
           </div>
         ))}
@@ -2157,6 +2164,83 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
               Permanently Delete My Account
             </button>
             <button className="btn btn-outline" onClick={() => { setDeleteOpen(false); setConfirmText(""); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Notifications Sheet */}
+      {notificationsOpen && (
+        <div className="sheet-overlay" onClick={() => setNotificationsOpen(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <div style={{ width: 20, height: 20, color: C.black }}><Icon.Bell /></div>
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Notifications</div>
+            <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 8 }}>
+              In-app notifications are coming soon — they'll be used for activity in The Lounge when it launches, such as replies to your posts and friend requests.
+            </p>
+            <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 22 }}>
+              For now, your last-round summary and coaching tips appear automatically each time you log in.
+            </p>
+            <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>Got it</button>
+          </div>
+        </div>
+      )}
+
+      {/* Privacy Sheet */}
+      {privacyOpen && (
+        <div className="sheet-overlay" onClick={() => setPrivacyOpen(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Privacy</div>
+            {[
+              { title: "Your data stays on your device", body: "Your golf rounds, scores, handicap and bag data are stored locally on this device only. Nothing is uploaded to a central server." },
+              { title: "Course search", body: "When you search for a course, your search term is sent to GolfCourseAPI to return results. No personal data is included in these requests." },
+              { title: "Scorecard scanning", body: "When you scan a scorecard, the image is sent securely to Anthropic's API to extract hole data. Images are not stored or used for training." },
+              { title: "No advertising", body: "Bobba Golf does not display ads or share your data with advertisers." },
+              { title: "Delete your account", body: "You can delete your account and all associated data at any time from the Account section." },
+            ].map(({ title, body }) => (
+              <div key={title} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{title}</div>
+                <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>{body}</p>
+              </div>
+            ))}
+            <p style={{ fontSize: 11, color: C.ash, lineHeight: 1.5, marginBottom: 18 }}>
+              A full privacy policy will be published at launch. For questions contact Josh: 07840059402
+            </p>
+            <button className="btn btn-primary" onClick={() => setPrivacyOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* Help & Support Sheet */}
+      {helpOpen && (
+        <div className="sheet-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Help & Support</div>
+            {[
+              { q: "How is my handicap calculated?", a: "Using the official WHS formula — score differential per round, averaged from your best rounds across your last 20. It updates automatically each time you submit a scorecard." },
+              { q: "What is Stableford / Points?", a: "A scoring system where each hole is worth points based on your score relative to par and your stroke index allocation. Par = 2 points, birdie = 3, bogey = 1, double bogey or worse = 0." },
+              { q: "How do I scan a scorecard?", a: "In Play a Round, tap 'Scan a Scorecard' and photograph your physical card. The AI reads hole numbers, par, stroke index and yardages automatically." },
+              { q: "Why is my Played To blank?", a: "Played To needs the course rating and slope to calculate. These are on your physical scorecard — scanning it will capture them for future rounds." },
+              { q: "How do I add clubs to The Bag?", a: "Go to The Bag module, tap the + button and fill in your club details including summer and winter yardages. Mark as complete when done." },
+              { q: "How do I delete a round?", a: "Open History, tap the red trash icon on any round card to delete it permanently." },
+            ].map(({ q, a }) => (
+              <div key={q} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{q}</div>
+                <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>{a}</p>
+              </div>
+            ))}
+            <div style={{ background: C.cloud, padding: "14px 16px", marginBottom: 18 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Found a bug or have a suggestion?</div>
+              <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>
+                Message Josh directly on WhatsApp: <span style={{ fontWeight: 700, color: C.black }}>07840059402</span>
+              </p>
+            </div>
+            <div style={{ fontSize: 10, color: C.ash, textAlign: "center", marginBottom: 16 }}>Bobba Golf · Beta v1.0</div>
+            <button className="btn btn-primary" onClick={() => setHelpOpen(false)}>Close</button>
           </div>
         </div>
       )}
