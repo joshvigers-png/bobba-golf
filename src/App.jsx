@@ -1139,7 +1139,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [tab, setTab] = useState("home");
   const [modulePage, setModulePage] = useState(null); // which module detail screen, if any
-  const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited
+  const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited (Layer 3)
+  const [viewRound, setViewRound] = useState(null); // a submitted round being viewed (Layer 2)
   const [showReset, setShowReset] = useState(false); // password reset flow
   const [briefing, setBriefing] = useState(null); // login welcome-back popup: { briefing, hasNoRounds } | null
 
@@ -1230,9 +1231,27 @@ export default function App() {
             user={user}
             round={reviewRound}
             onUpdateUser={updateUser}
-            onSave={(updated) => setReviewRound(null)}
+            onSave={(updated) => { setReviewRound(null); setViewRound(updated || null); }}
             onBack={() => setReviewRound(null)}
           />
+        </div>
+      </>
+    );
+  }
+
+  if (viewRound) {
+    return (
+      <>
+        <style>{css}</style>
+        <div className="app-shell">
+          <div className="scroll-area">
+            <RoundDetailView
+              user={user}
+              round={viewRound}
+              onBack={() => setViewRound(null)}
+              onEdit={() => { setReviewRound(viewRound); setViewRound(null); }}
+            />
+          </div>
         </div>
       </>
     );
@@ -1284,7 +1303,7 @@ export default function App() {
       <>
         <style>{css}</style>
         <div className="app-shell">
-          <HistoryScreen user={user} onBack={() => setModulePage(null)} onReviewRound={setReviewRound} onUpdateUser={updateUser} />
+          <HistoryScreen user={user} onBack={() => setModulePage(null)} onReviewRound={setReviewRound} onViewRound={setViewRound} onUpdateUser={updateUser} />
         </div>
       </>
     );
@@ -4715,6 +4734,140 @@ function NewPlayPostSheet({ user, onClose }) {
 // ─── Shared: condensed round summary strip (Course Par, Strokes, Points, +/-, HCP) ──
 // Returns the handicap index played on a specific round, plus a flag
 // indicating whether it was directly recorded or estimated from history.
+// ─── Round Detail View (Layer 2) ─────────────────────────────────────────────
+// Read-only scorecard view shown when tapping a round in History.
+// Displays all hole data in a clean scorecard-style grid.
+// "Edit Round" button at the bottom leads to RoundReviewFlow (Layer 3).
+function RoundDetailView({ user, round, onEdit, onBack }) {
+  const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
+  const { value: hcpPlayed } = getHcpPlayed(round, user);
+  const toPar = round.coursePar != null && round.totalGross ? round.totalGross - round.coursePar : null;
+
+  const HoleGrid = ({ holes }) => (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, tableLayout: "fixed" }}>
+        <thead>
+          <tr style={{ background: C.black, color: C.white }}>
+            <td style={{ padding: "6px 8px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 32 }}>Hole</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>Par</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>SI</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 36 }}>Gross</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 32 }}>Pts</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 36 }}>Putts</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>FIR</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>GIR</td>
+          </tr>
+        </thead>
+        <tbody>
+          {holes.map((h, i) => {
+            const s = round.scores?.[h.n] || {};
+            const gross = parseInt(s.strokes);
+            const pts = gross ? stablefordPts(gross, h.par, hcpPlayed || 0, s.si ?? h.si) : null;
+            const isEven = i % 2 === 0;
+            const ptColor = pts == null ? C.steel : pts >= 2 ? "#1B7A3D" : pts === 1 ? "#E08A1E" : "#C8392D";
+            return (
+              <tr key={h.n} style={{ background: isEven ? C.white : C.paper }}>
+                <td style={{ padding: "7px 8px", fontWeight: 800 }}>{h.n}</td>
+                <td style={{ padding: "7px 4px", color: C.steel }}>{h.par}</td>
+                <td style={{ padding: "7px 4px", color: C.ash }}>{s.si ?? h.si ?? "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 700 }}>{gross || "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800, color: ptColor }}>{pts ?? "—"}</td>
+                <td style={{ padding: "7px 4px", color: C.steel }}>{s.putts ?? "—"}</td>
+                <td style={{ padding: "7px 4px" }}>
+                  {h.par >= 4 && s.fir != null ? (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: s.fir ? "#1B7A3D" : "#C8392D" }}>{s.fir ? "✓" : "✗"}</span>
+                  ) : <span style={{ color: C.ash }}>—</span>}
+                </td>
+                <td style={{ padding: "7px 4px" }}>
+                  {s.gir != null ? (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: s.gir ? "#1B7A3D" : "#C8392D" }}>{s.gir ? "✓" : "✗"}</span>
+                  ) : <span style={{ color: C.ash }}>—</span>}
+                </td>
+              </tr>
+            );
+          })}
+          {/* Nine totals row */}
+          {(() => {
+            const grossTotal = holes.reduce((s, h) => s + (parseInt(round.scores?.[h.n]?.strokes) || 0), 0);
+            const ptsTotal = holes.reduce((s, h) => {
+              const sc = round.scores?.[h.n] || {};
+              const g = parseInt(sc.strokes);
+              return s + (g ? (stablefordPts(g, h.par, hcpPlayed || 0, sc.si ?? h.si) || 0) : 0);
+            }, 0);
+            return (
+              <tr style={{ background: C.cloud, borderTop: `1.5px solid ${C.line}` }}>
+                <td colSpan={3} style={{ padding: "7px 8px", fontWeight: 800, fontSize: 10, textTransform: "uppercase", letterSpacing: ".04em", color: C.steel }}>
+                  {holes[0].n <= 9 ? "Out" : "In"}
+                </td>
+                <td style={{ padding: "7px 4px", fontWeight: 800 }}>{grossTotal || "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800 }}>{ptsTotal || "—"}</td>
+                <td colSpan={3} />
+              </tr>
+            );
+          })()}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const front = course?.holes.slice(0, 9) || [];
+  const back = course?.holes.slice(9, 18) || [];
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+      <div className="page-head">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> History
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">Scorecard</div>
+          <h1 style={{ fontSize: 22 }}>{round.courseName}</h1>
+          <p style={{ marginTop: 2 }}>
+            {new Date(round.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · {round.holesPlayed} holes
+            {hcpPlayed != null && <> · HCP {hcpPlayed.toFixed(1)}</>}
+          </p>
+        </div>
+      </div>
+
+      {/* Summary strip */}
+      <div style={{ margin: "0 18px 18px" }}>
+        <RoundSummaryStrip round={round} user={user} />
+      </div>
+
+      {/* Scorecard grids */}
+      {course ? (
+        <>
+          {front.length > 0 && (
+            <div style={{ margin: "0 18px 14px" }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: C.black }}>Front Nine</div>
+              <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+                <HoleGrid holes={front} />
+              </div>
+            </div>
+          )}
+          {back.length > 0 && (
+            <div style={{ margin: "0 18px 14px" }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: C.black }}>Back Nine</div>
+              <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+                <HoleGrid holes={back} />
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div style={{ margin: "0 18px 18px", padding: 16, background: C.white, border: `1px solid ${C.line}`, color: C.steel, fontSize: 12.5 }}>
+          Hole-by-hole data not available for this round.
+        </div>
+      )}
+
+      {/* Edit button */}
+      <div style={{ margin: "0 18px" }}>
+        <button className="btn btn-primary" onClick={onEdit}>Edit Round</button>
+      </div>
+    </div>
+  );
+}
+
 function getHcpPlayed(round, user) {
   if (round.handicapPlayed != null) return { value: round.handicapPlayed, estimated: false };
   if (!user?.handicapHistory?.length) return { value: null, estimated: false };
@@ -4788,7 +4941,7 @@ function RoundSummaryStrip({ round, user }) {
 }
 
 // ─── History ──────────────────────────────────────────────────────────────────
-function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
+function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser }) {
   const [allRounds, setAllRounds] = useState(LS.get(`bb_rounds_${user.id}`) || []);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
@@ -4834,7 +4987,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
     return (
       <div className="course-row" style={{ alignItems: "flex-start", flexDirection: "column", cursor: "default" }}>
         <div style={{ display: "flex", width: "100%", alignItems: "flex-start" }}>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => onReviewRound(r)}>
+          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => onViewRound(r)}>
             <div className="course-name">{r.courseName}</div>
             <div className="course-loc">{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} · {r.holesPlayed} holes</div>
             {hcpPlayed != null && (
@@ -4852,7 +5005,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onUpdateUser }) {
             </button>
           </div>
         </div>
-        <div style={{ width: "100%", cursor: "pointer" }} onClick={() => onReviewRound(r)}><RoundSummaryStrip round={r} user={user} /></div>
+        <div style={{ width: "100%", cursor: "pointer" }} onClick={() => onViewRound(r)}><RoundSummaryStrip round={r} user={user} /></div>
         {(() => {
           const course = r.course || COURSE_DB.find(c => c.id === r.courseId);
           if (!course || !r.scores) return null;
