@@ -1278,6 +1278,16 @@ export default function App() {
       </>
     );
   }
+  if (modulePage === "tournaments") {
+    return (
+      <>
+        <style>{css}</style>
+        <div className="app-shell">
+          <CompetitionScreen user={user} onBack={() => setModulePage(null)} />
+        </div>
+      </>
+    );
+  }
   if (modulePage === "analysis") {
     return (
       <>
@@ -1769,7 +1779,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
     { id: "history",     label: "History", sub: "Past scorecards", icon: <Icon.Score />, ready: true },
     { id: "bag",         label: "The Bag", sub: "Your setup", icon: <Icon.ModBag />, ready: true },
     { id: "community",   label: "The Lounge", sub: "Coming soon", icon: <Icon.ModLounge />, ready: false },
-    { id: "tournaments", label: "Competition Mode", sub: "Coming soon", icon: <Icon.ModTrophy />, ready: false },
+    { id: "tournaments", label: "Competition Mode", sub: "2-ball, 3-ball, 4-ball games", icon: <Icon.ModTrophy />, ready: true },
     { id: "analysis",    label: "Performance", sub: "Your game, tracked", icon: <Icon.ModPerform />, ready: true },
     { id: "goals",       label: "Goals & Training", sub: "Reach your targets", icon: <Icon.Target />, ready: true },
     { id: "store",       label: "Apparel", sub: "Coming soon", icon: <Icon.ModApparel />, ready: false },
@@ -3871,6 +3881,709 @@ function computeGameStats(user, rounds, range = "all") {
     firRate, girRate, avgPuttsGIR, avgPuttsOffGIR, trend,
     bagWithYardage, biggestGap, missingCategories, driver, driverLoft, driverYardage,
   };
+}
+
+// ─── Competition Mode ──────────────────────────────────────────────────────────
+const COMP_FORMATS = [
+  { id: "stableford", label: "Stableford", desc: "Points per hole based on handicap" },
+  { id: "stroke",     label: "Stroke Play", desc: "Lowest total gross score wins" },
+  { id: "matchplay",  label: "Match Play", desc: "Hole by hole — most holes won wins" },
+];
+const BALL_COUNTS = [2, 3, 4];
+const compsKey = (uid) => `bb_comps_${uid}`;
+
+function CompetitionScreen({ user, onBack }) {
+  const [view, setView] = useState("home"); // home | setup | course | scoring | result | history | detail
+  const [comps, setComps] = useState(() => LS.get(compsKey(user.id)) || []);
+  const [activeComp, setActiveComp] = useState(null);
+  const [detailComp, setDetailComp] = useState(null);
+
+  const persist = (next) => { setComps(next); LS.set(compsKey(user.id), next); };
+
+  const saveComp = (comp) => {
+    const next = [...comps, comp];
+    persist(next);
+  };
+
+  const updateComp = (comp) => {
+    const next = comps.map(c => c.id === comp.id ? comp : c);
+    persist(next);
+    setActiveComp(comp);
+  };
+
+  // ── Home ──
+  if (view === "home") {
+    const recent = [...comps].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 3);
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <div className="page-head">
+          <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div className="page-head-eyebrow">Competition Mode</div>
+            <h1>Game</h1>
+          </div>
+        </div>
+
+        <div style={{ padding: "0 18px 18px" }}>
+          <button className="btn btn-primary" style={{ marginBottom: 10 }} onClick={() => setView("setup")}>
+            + New Game
+          </button>
+          <button className="btn btn-outline" onClick={() => setView("history")}>
+            View History
+          </button>
+        </div>
+
+        {/* Society — Coming Soon */}
+        <div style={{ margin: "0 18px 14px", padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 18, height: 18, color: C.ash }}><Icon.ModLounge /></div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13, color: C.steel }}>Society</div>
+            <div style={{ fontSize: 11, color: C.ash }}>Coming soon</div>
+          </div>
+          <div style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", background: C.cloud, color: C.steel, padding: "3px 8px", borderRadius: 20 }}>Soon</div>
+        </div>
+
+        {/* Ryder Cup — Coming Soon */}
+        <div style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 18, height: 18, color: C.ash }}><Icon.ModTrophy /></div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 13, color: C.steel }}>Ryder Cup</div>
+            <div style={{ fontSize: 11, color: C.ash }}>Create your own team matchplay event</div>
+          </div>
+          <div style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", background: C.cloud, color: C.steel, padding: "3px 8px", borderRadius: 20 }}>Soon</div>
+        </div>
+
+        {recent.length > 0 && (
+          <>
+            <div className="section-head"><span className="section-title">Recent Games</span></div>
+            {recent.map(c => (
+              <div key={c.id} className="course-row" onClick={() => { setDetailComp(c); setView("detail"); }} style={{ cursor: "pointer" }}>
+                <div style={{ flex: 1 }}>
+                  <div className="course-name">{c.courseName}</div>
+                  <div className="course-loc">{new Date(c.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {COMP_FORMATS.find(f=>f.id===c.format)?.label} · {c.players.length}-ball</div>
+                </div>
+                <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── Setup: players + format + side games ──
+  if (view === "setup") {
+    return <CompSetupFlow
+      onBack={() => setView("home")}
+      onNext={(draft) => { setActiveComp(draft); setView("course"); }}
+    />;
+  }
+
+  // ── Course selection ──
+  if (view === "course") {
+    return <CompCourseFlow
+      onBack={() => setView("setup")}
+      onNext={(course) => {
+        const comp = {
+          ...activeComp,
+          id: Date.now(),
+          courseId: course.id,
+          courseName: course.name,
+          course,
+          createdAt: Date.now(),
+          completed: false,
+          scores: {}, // { playerId: { holeN: { strokes, putts } } }
+          sideGameWinners: {}, // { nearestPin: {hole,winner}, nearestIn2: {hole,winner}, longestDrive: {hole,winner} }
+        };
+        setActiveComp(comp);
+        saveComp(comp);
+        setView("scoring");
+      }}
+    />;
+  }
+
+  // ── Live scoring ──
+  if (view === "scoring" && activeComp) {
+    return <CompScoringFlow
+      comp={activeComp}
+      onUpdate={updateComp}
+      onFinish={(comp) => { updateComp(comp); setDetailComp(comp); setView("detail"); }}
+      onBack={() => setView("home")}
+    />;
+  }
+
+  // ── Result / Detail view ──
+  if (view === "detail" && detailComp) {
+    return <CompDetailView
+      comp={detailComp}
+      onBack={() => setView("history")}
+      onResume={() => { setActiveComp(detailComp); setView("scoring"); }}
+    />;
+  }
+
+  // ── History ──
+  if (view === "history") {
+    const sorted = [...comps].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <div className="page-head">
+          <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div className="page-head-eyebrow">Competition Mode</div>
+            <h1>History</h1>
+            <p>{sorted.length} game{sorted.length !== 1 ? "s" : ""} played</p>
+          </div>
+        </div>
+        {sorted.length === 0 ? (
+          <div className="empty">
+            <div className="empty-icon"><Icon.ModTrophy /></div>
+            <div className="empty-title">No games yet</div>
+            <div className="empty-sub">Start a new game to see it here.</div>
+          </div>
+        ) : sorted.map(c => (
+          <div key={c.id} className="course-row" onClick={() => { setDetailComp(c); setView("detail"); }} style={{ cursor: "pointer" }}>
+            <div style={{ flex: 1 }}>
+              <div className="course-name">{c.courseName}</div>
+              <div className="course-loc">{new Date(c.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {COMP_FORMATS.find(f=>f.id===c.format)?.label} · {c.players.length}-ball</div>
+              <div className="course-loc" style={{ marginTop: 2 }}>{c.players.map(p=>p.name).join(", ")}</div>
+            </div>
+            <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ─── Competition Setup Flow ────────────────────────────────────────────────────
+function CompSetupFlow({ onBack, onNext }) {
+  const [ballCount, setBallCount] = useState(2);
+  const [format, setFormat] = useState("stableford");
+  const [players, setPlayers] = useState([
+    { id: 1, name: "", handicap: "" },
+    { id: 2, name: "", handicap: "" },
+  ]);
+  const [sideGames, setSideGames] = useState({ nearestPin: false, nearestIn2: false, longestDrive: false });
+  const [error, setError] = useState("");
+
+  const updateBallCount = (n) => {
+    setBallCount(n);
+    const next = Array.from({ length: n }, (_, i) => players[i] || { id: i + 1, name: "", handicap: "" });
+    setPlayers(next);
+  };
+
+  const updatePlayer = (idx, field, val) => {
+    const next = [...players];
+    next[idx] = { ...next[idx], [field]: val };
+    setPlayers(next);
+  };
+
+  const handleNext = () => {
+    if (players.some(p => !p.name.trim())) { setError("Please enter a name for every player."); return; }
+    setError("");
+    onNext({
+      format,
+      ballCount,
+      players: players.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
+      sideGames,
+    });
+  };
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+      <div className="page-head">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">New Game</div>
+          <h1>Set Up</h1>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 18px" }}>
+        {/* Ball count */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Number of Players</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {BALL_COUNTS.map(n => (
+              <button key={n} onClick={() => updateBallCount(n)} style={{ flex: 1, padding: "12px 0", fontWeight: 800, fontSize: 14, border: `1.5px solid ${ballCount === n ? C.black : C.line}`, background: ballCount === n ? C.black : C.white, color: ballCount === n ? C.white : C.black, cursor: "pointer" }}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Format */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Format</label>
+          {COMP_FORMATS.filter(f => !(f.id === "matchplay" && ballCount === 3)).map(f => (
+            <div key={f.id} onClick={() => setFormat(f.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", marginBottom: 6, border: `1.5px solid ${format === f.id ? C.black : C.line}`, background: format === f.id ? C.black : C.white, cursor: "pointer" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, color: format === f.id ? C.white : C.black }}>{f.label}</div>
+                <div style={{ fontSize: 11, color: format === f.id ? "rgba(255,255,255,.6)" : C.steel, marginTop: 2 }}>{f.desc}</div>
+              </div>
+              {format === f.id && <div style={{ width: 18, height: 18, color: C.white }}><Icon.Check /></div>}
+            </div>
+          ))}
+        </div>
+
+        {/* Players */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Players</label>
+          {players.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input className="input" style={{ flex: 2 }} placeholder={`Player ${i + 1} name`} value={p.name} onChange={e => updatePlayer(i, "name", e.target.value)} />
+              <input className="input" style={{ flex: 1 }} placeholder="HCP" type="number" step="0.1" value={p.handicap} onChange={e => updatePlayer(i, "handicap", e.target.value)} />
+            </div>
+          ))}
+        </div>
+
+        {/* Side games */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Side Games <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional</span></label>
+          {[
+            { key: "nearestPin", label: "Nearest the Pin" },
+            { key: "nearestIn2", label: "Nearest the Pin in 2" },
+            { key: "longestDrive", label: "Longest Drive" },
+          ].map(({ key, label }) => (
+            <div key={key} onClick={() => setSideGames(s => ({ ...s, [key]: !s[key] }))} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", marginBottom: 6, border: `1.5px solid ${sideGames[key] ? C.black : C.line}`, background: sideGames[key] ? C.black : C.white, cursor: "pointer" }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: sideGames[key] ? C.white : C.black }}>{label}</span>
+              {sideGames[key] && <div style={{ width: 18, height: 18, color: C.white }}><Icon.Check /></div>}
+            </div>
+          ))}
+        </div>
+
+        {error && <p style={{ fontSize: 12, color: C.red, marginBottom: 10 }}>{error}</p>}
+        <button className="btn btn-primary" onClick={handleNext}>Find a Course →</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Competition Course Flow ───────────────────────────────────────────────────
+// Reuses the same search + scan pattern as Play a Round
+function CompCourseFlow({ onBack, onNext }) {
+  const [step, setStep] = useState("search"); // search | scan
+  const [query, setQuery] = useState("");
+  const [courses, setCourses] = useState(COURSE_DB.map(c => ({ id: c.id, name: c.name, location: c.location || "", raw: c })));
+  const [searching, setSearching] = useState(false);
+  const [loadingCourse, setLoadingCourse] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [preScanCourse, setPreScanCourse] = useState(null);
+
+  useEffect(() => {
+    if (!query.trim()) { setCourses(COURSE_DB.map(c => ({ id: c.id, name: c.name, location: c.location || "", raw: c }))); return; }
+    const t = setTimeout(async () => {
+      setSearching(true); setSearchError("");
+      try {
+        const res = await fetch(`${COURSE_API_PROXY}/search?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        if (data.courses) setCourses(data.courses.map(c => ({ id: c.id, name: c.club_name || c.course_name, location: `${c.location?.city || ""}, ${c.location?.country || ""}`.trim().replace(/^,\s*/, ""), raw: null })));
+        else if (data['x-deny-reason']) setSearchError("Search unavailable. Try scanning your scorecard instead.");
+        else setCourses([]);
+      } catch { setSearchError("Search failed."); }
+      setSearching(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const selectCourse = async (c) => {
+    if (c.raw) { onNext(c.raw); return; }
+    setLoadingCourse(true);
+    try {
+      const res = await fetch(`${COURSE_API_PROXY}/course/${c.id}`);
+      const data = await res.json();
+      if (data.course) {
+        const raw = data.course;
+        const teeKey = "white";
+        const teeData = raw.tees?.male || raw.tees?.female || {};
+        const teeArr = Object.values(teeData).flat();
+        const tees = {};
+        teeArr.forEach(t => { if (t.tee_name) tees[t.tee_name.toLowerCase().replace(/\s+/g,"")] = { rating: t.course_rating, slope: t.slope_rating }; });
+        const sampleTee = teeArr[0];
+        const holes = (sampleTee?.holes || []).map((h, i) => ({ n: i+1, par: h.par ?? 4, si: h.handicap ?? (i+1), yds: { [teeKey]: h.yardage } }));
+        onNext({ id: c.id, name: c.name, location: c.location, tees, holes });
+      }
+    } catch {}
+    setLoadingCourse(false);
+  };
+
+  if (step === "scan") {
+    return <ScanScorecardStep onBack={() => setStep("search")} proxyUrl={COURSE_API_PROXY} existingCourse={preScanCourse} onConfirm={(builtCourse) => { onNext(builtCourse); }} />;
+  }
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh" }}>
+      <div className="page-head">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div className="page-head-eyebrow">New Game</div>
+        <h1>Find a Course</h1>
+      </div>
+      <div style={{ padding: "0 18px 18px" }}>
+        <div style={{ background: C.black, borderRadius: 1, padding: "14px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => { setPreScanCourse(null); setStep("scan"); }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 18, height: 18, color: C.white }}><Icon.ModRound /></div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: C.white }}>Scan a Scorecard</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 2 }}>Auto-populates all hole data including stroke index</div>
+          </div>
+          <div style={{ width: 14, height: 14, color: "rgba(255,255,255,.4)" }}><Icon.ChevronRight /></div>
+        </div>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: C.steel, marginBottom: 8 }}>Or search</div>
+        <div style={{ position: "relative" }}>
+          <input className="input" placeholder="Search by course or club name…" value={query} onChange={e => setQuery(e.target.value)} style={{ paddingLeft: 38 }} />
+          <div style={{ position: "absolute", left: 13, top: 14, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
+        </div>
+      </div>
+      {searchError && <p style={{ fontSize: 11.5, color: C.steel, textAlign: "center", padding: "0 24px", lineHeight: 1.5 }}>{searchError}</p>}
+      <div className="section-head"><span className="section-title">{query.trim() ? "Results" : "All Courses"}</span></div>
+      {(searching || loadingCourse) && <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: 18 }}>{loadingCourse ? "Loading…" : "Searching…"}</p>}
+      {!searching && !loadingCourse && courses.map(c => (
+        <div key={c.id} className="course-row" style={{ flexDirection: "column", alignItems: "stretch", cursor: "default" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "4px 0" }} onClick={() => selectCourse(c)}>
+            <div className="course-icon-wrap" style={{ background: "#2563EB" }}><Icon.Pin /></div>
+            <div style={{ flex: 1 }}>
+              <div className="course-name">{c.name}</div>
+              <div className="course-loc">{c.location}</div>
+            </div>
+            <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+          </div>
+        </div>
+      ))}
+      {!searching && !loadingCourse && courses.length === 0 && query.trim().length > 1 && (
+        <div className="empty">
+          <div className="empty-icon"><Icon.Pin /></div>
+          <div className="empty-title">No courses found</div>
+          <div className="empty-sub">Use the scan option above.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Competition Scoring Flow ──────────────────────────────────────────────────
+function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
+  const [currentHole, setCurrentHole] = useState(1);
+  const [scores, setScores] = useState(comp.scores || {});
+  const [sideGameWinners, setSideGameWinners] = useState(comp.sideGameWinners || {});
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showSideGame, setShowSideGame] = useState(null);
+
+  const course = comp.course;
+  const holes = course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}}));
+  const hole = holes.find(h => h.n === currentHole) || holes[0];
+
+  const updateScore = (playerId, field, val) => {
+    const next = { ...scores, [playerId]: { ...(scores[playerId]||{}), [hole.n]: { ...(scores[playerId]?.[hole.n]||{}), [field]: val } } };
+    setScores(next);
+    onUpdate({ ...comp, scores: next, sideGameWinners });
+  };
+
+  const getScore = (playerId, field) => scores[playerId]?.[hole.n]?.[field];
+
+  // ── Stableford points for a player on a hole ──
+  const playerPts = (player, h) => {
+    const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+    if (!gross) return null;
+    return stablefordPts(gross, h.par, player.handicap, scores[player.id]?.[h.n]?.si ?? h.si);
+  };
+
+  // ── Match play: net score per hole ──
+  const netScore = (player, h) => {
+    const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+    if (!gross) return null;
+    const shots = strokesReceived(player.handicap, scores[player.id]?.[h.n]?.si ?? h.si);
+    return gross - shots;
+  };
+
+  // ── Leaderboard calculations ──
+  const leaderboard = () => {
+    if (comp.format === "stableford") {
+      return comp.players.map(p => {
+        const total = holes.reduce((s,h) => s + (playerPts(p,h)||0), 0);
+        return { ...p, total, label: `${total} pts` };
+      }).sort((a,b) => b.total - a.total);
+    }
+    if (comp.format === "stroke") {
+      return comp.players.map(p => {
+        const total = holes.reduce((s,h) => s + (parseInt(scores[p.id]?.[h.n]?.strokes)||0), 0);
+        return { ...p, total, label: total > 0 ? `${total} strokes` : "—" };
+      }).sort((a,b) => (a.total||999) - (b.total||999));
+    }
+    if (comp.format === "matchplay") {
+      // 2-ball or 4-ball best ball
+      if (comp.ballCount === 2) {
+        const [p1, p2] = comp.players;
+        let p1wins = 0, p2wins = 0, halved = 0;
+        const playedHoles = [];
+        holes.forEach(h => {
+          const n1 = netScore(p1, h), n2 = netScore(p2, h);
+          if (n1 == null || n2 == null) return;
+          playedHoles.push(h.n);
+          if (n1 < n2) p1wins++;
+          else if (n2 < n1) p2wins++;
+          else halved++;
+        });
+        const diff = p1wins - p2wins;
+        const holesLeft = 18 - (playedHoles.length);
+        const status = diff === 0 ? "All Square" : diff > 0 ? `${p1.name} ${diff} UP` : `${p2.name} ${Math.abs(diff)} UP`;
+        const dormie = Math.abs(diff) > 0 && Math.abs(diff) === holesLeft;
+        return [
+          { ...p1, total: p1wins, label: `${p1wins}W ${halved}H ${p2wins}L` },
+          { ...p2, total: p2wins, label: `${p2wins}W ${halved}H ${p1wins}L` },
+        ].concat([{ id: "status", name: status + (dormie ? " (Dormie)" : ""), total: 0, label: "", isStatus: true }]);
+      }
+      // 4-ball — best ball per pair
+      if (comp.ballCount === 4) {
+        const team1 = [comp.players[0], comp.players[1]];
+        const team2 = [comp.players[2], comp.players[3]];
+        let t1wins = 0, t2wins = 0, halved = 0;
+        holes.forEach(h => {
+          const bestNet = (team) => {
+            const nets = team.map(p => netScore(p, h)).filter(n => n != null);
+            return nets.length ? Math.min(...nets) : null;
+          };
+          const n1 = bestNet(team1), n2 = bestNet(team2);
+          if (n1 == null || n2 == null) return;
+          if (n1 < n2) t1wins++;
+          else if (n2 < n1) t2wins++;
+          else halved++;
+        });
+        const diff = t1wins - t2wins;
+        const status = diff === 0 ? "All Square" : diff > 0 ? `${team1[0].name}/${team1[1].name} ${diff} UP` : `${team2[0].name}/${team2[1].name} ${Math.abs(diff)} UP`;
+        return [
+          { id: "t1", name: `${team1[0].name} & ${team1[1].name}`, total: t1wins, label: `${t1wins}W ${halved}H ${t2wins}L` },
+          { id: "t2", name: `${team2[0].name} & ${team2[1].name}`, total: t2wins, label: `${t2wins}W ${halved}H ${t1wins}L` },
+          { id: "status", name: status, total: 0, label: "", isStatus: true },
+        ];
+      }
+    }
+    return [];
+  };
+
+  const lb = leaderboard();
+  const allHolesPlayed = comp.players.every(p => holes.every(h => scores[p.id]?.[h.n]?.strokes));
+
+  const handleFinish = () => {
+    onFinish({ ...comp, scores, sideGameWinners, completed: true, completedAt: Date.now() });
+  };
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 100 }}>
+      {/* Sticky header */}
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: C.black, padding: "10px 18px", display: "flex", alignItems: "center", gap: 10 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.white, cursor: "pointer", padding: 0, marginRight: 4 }}>
+          <div style={{ width: 18, height: 18, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div>
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: C.white }}>{comp.courseName}</div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,.5)" }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · Hole {currentHole}/18</div>
+        </div>
+        <button onClick={() => setShowLeaderboard(true)} style={{ background: "rgba(255,255,255,.12)", border: "none", color: C.white, padding: "6px 12px", fontWeight: 800, fontSize: 11, cursor: "pointer", borderRadius: 4 }}>
+          Leaderboard
+        </button>
+      </div>
+
+      {/* Hole header */}
+      <div style={{ padding: "16px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button onClick={() => setCurrentHole(h => Math.max(1, h-1))} disabled={currentHole === 1} style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: currentHole === 1 ? 0.3 : 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div>
+        </button>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontWeight: 900, fontSize: 32, lineHeight: 1 }}>{currentHole}</div>
+          <div style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>Par {hole.par} · SI {hole.si}</div>
+        </div>
+        <button onClick={() => setCurrentHole(h => Math.min(18, h+1))} disabled={currentHole === 18} style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: currentHole === 18 ? 0.3 : 1 }}>
+          <div style={{ width: 14, height: 14 }}><Icon.ChevronRight /></div>
+        </button>
+      </div>
+
+      {/* Player score inputs */}
+      {comp.players.map(player => {
+        const gross = parseInt(getScore(player.id, "strokes"));
+        const pts = playerPts(player, hole);
+        const ptColor = pts == null ? C.steel : pts >= 2 ? "#1B7A3D" : pts === 1 ? "#E08A1E" : "#C8392D";
+        return (
+          <div key={player.id} style={{ margin: "0 18px 12px", background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>{player.name}</div>
+                <div style={{ fontSize: 11, color: C.steel }}>HCP {player.handicap}</div>
+              </div>
+              {pts != null && <div className="hole-pts-badge" style={{ background: holePtsColor(pts), color: holePtsTextColor(pts) }}>{pts}</div>}
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Strokes</div>
+                <div className="stepper">
+                  <button className="stepper-btn" onClick={() => updateScore(player.id, "strokes", Math.max(1, (gross||0)-1))}><Icon.Minus /></button>
+                  <div className="stepper-val">{gross || "—"}</div>
+                  <button className="stepper-btn" onClick={() => updateScore(player.id, "strokes", (gross||0)+1)}><Icon.Plus /></button>
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Putts</div>
+                <div className="stepper">
+                  <button className="stepper-btn" onClick={() => updateScore(player.id, "putts", Math.max(0, (parseInt(getScore(player.id,"putts"))||0)-1))}><Icon.Minus /></button>
+                  <div className="stepper-val">{getScore(player.id,"putts") ?? "—"}</div>
+                  <button className="stepper-btn" onClick={() => updateScore(player.id, "putts", (parseInt(getScore(player.id,"putts"))||0)+1)}><Icon.Plus /></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Side games for this hole */}
+      {Object.entries(comp.sideGames).filter(([,v])=>v).map(([key]) => {
+        const labels = { nearestPin: "Nearest the Pin", nearestIn2: "Nearest in 2", longestDrive: "Longest Drive" };
+        const winner = sideGameWinners[key]?.hole === currentHole ? sideGameWinners[key]?.winner : null;
+        return (
+          <div key={key} style={{ margin: "0 18px 12px", background: C.white, border: `1px solid ${C.line}`, padding: "12px 16px" }}>
+            <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8 }}>{labels[key]}</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {comp.players.map(p => (
+                <button key={p.id} onClick={() => {
+                  const next = { ...sideGameWinners, [key]: { hole: currentHole, winner: p.name } };
+                  setSideGameWinners(next);
+                  onUpdate({ ...comp, scores, sideGameWinners: next });
+                }} style={{ flex: 1, padding: "8px 4px", fontWeight: 700, fontSize: 11, border: `1.5px solid ${winner === p.name ? "#1B7A3D" : C.line}`, background: winner === p.name ? "#1B7A3D" : C.white, color: winner === p.name ? C.white : C.black, cursor: "pointer" }}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Navigation + finish */}
+      <div style={{ padding: "0 18px", display: "flex", gap: 10 }}>
+        {currentHole < 18 ? (
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setCurrentHole(h => h + 1)}>Next Hole →</button>
+        ) : (
+          <button className="btn btn-primary" style={{ flex: 1, background: "#1B7A3D" }} onClick={handleFinish}>Finish Round</button>
+        )}
+      </div>
+
+      {/* Leaderboard sheet */}
+      {showLeaderboard && (
+        <div className="sheet-overlay" onClick={() => setShowLeaderboard(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Leaderboard</div>
+            <div style={{ fontSize: 11, color: C.steel, marginBottom: 16 }}>After {currentHole - 1} hole{currentHole - 1 !== 1 ? "s" : ""}</div>
+            {lb.filter(p => !p.isStatus).map((p, i) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: i === 0 ? C.black : C.cloud, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: i === 0 ? C.white : C.steel, flexShrink: 0 }}>{i+1}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>{p.label}</div>
+                </div>
+              </div>
+            ))}
+            {lb.find(p => p.isStatus) && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: C.cloud, fontWeight: 700, fontSize: 13, textAlign: "center" }}>
+                {lb.find(p => p.isStatus).name}
+              </div>
+            )}
+            <button className="btn btn-primary" style={{ marginTop: 18 }} onClick={() => setShowLeaderboard(false)}>Close</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Competition Detail View ───────────────────────────────────────────────────
+function CompDetailView({ comp, onBack, onResume }) {
+  const course = comp.course;
+  const holes = course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}}));
+
+  const playerTotal = (player, field) => {
+    if (field === "strokes") return holes.reduce((s,h) => s + (parseInt(comp.scores?.[player.id]?.[h.n]?.strokes)||0), 0);
+    if (field === "pts") return holes.reduce((s,h) => {
+      const gross = parseInt(comp.scores?.[player.id]?.[h.n]?.strokes);
+      if (!gross) return s;
+      return s + (stablefordPts(gross, h.par, player.handicap, comp.scores?.[player.id]?.[h.n]?.si ?? h.si) || 0);
+    }, 0);
+    return 0;
+  };
+
+  const sideGameLabels = { nearestPin: "Nearest the Pin", nearestIn2: "Nearest in 2", longestDrive: "Longest Drive" };
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+      <div className="page-head">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">{COMP_FORMATS.find(f=>f.id===comp.format)?.label}</div>
+          <h1 style={{ fontSize: 22 }}>{comp.courseName}</h1>
+          <p>{new Date(comp.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
+        </div>
+      </div>
+
+      {/* Results summary */}
+      <div style={{ margin: "0 18px 18px" }}>
+        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>Results</div>
+        {comp.players.map((p, i) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 6 }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: i === 0 ? C.black : C.cloud, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: i === 0 ? C.white : C.steel, flexShrink: 0 }}>{i+1}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+              <div style={{ fontSize: 11, color: C.steel }}>HCP {p.handicap}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{playerTotal(p,"strokes") || "—"}</div>
+              <div style={{ fontSize: 10, color: C.steel }}>strokes</div>
+            </div>
+            <div style={{ textAlign: "right", minWidth: 40 }}>
+              <div style={{ fontWeight: 800, fontSize: 16, color: "#1B7A3D" }}>{playerTotal(p,"pts")}</div>
+              <div style={{ fontSize: 10, color: C.steel }}>pts</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Side game winners */}
+      {Object.entries(comp.sideGames || {}).filter(([,v])=>v).some(([k]) => comp.sideGameWinners?.[k]) && (
+        <div style={{ margin: "0 18px 18px" }}>
+          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>Side Games</div>
+          {Object.entries(comp.sideGames || {}).filter(([,v])=>v).map(([key]) => {
+            const w = comp.sideGameWinners?.[key];
+            if (!w) return null;
+            return (
+              <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 6 }}>
+                <div style={{ flex: 1, fontWeight: 700, fontSize: 12 }}>{sideGameLabels[key]} — Hole {w.hole}</div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: "#1B7A3D" }}>{w.winner}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!comp.completed && (
+        <div style={{ padding: "0 18px" }}>
+          <button className="btn btn-primary" onClick={onResume}>Resume Round</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PerformanceScreen({ user, onBack }) {
