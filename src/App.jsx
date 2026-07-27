@@ -3856,6 +3856,14 @@ function PerformanceScreen({ user, onBack }) {
   const mostRecentRound = filtered.length ? filtered[filtered.length - 1] : null;
   const fmtRoundDate = (r) => r ? new Date(r.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
 
+  // Best and worst round THIS YEAR specifically — independent of the range
+  // filter so it always shows the calendar year picture regardless of
+  // whether the user is viewing Last 5 / Last 10 / All.
+  const thisYear = new Date().getFullYear();
+  const thisYearRounds = rounds.filter(r => new Date(r.date).getFullYear() === thisYear && r.totalPts != null);
+  const bestThisYear = thisYearRounds.length ? thisYearRounds.reduce((a,b) => b.totalPts > a.totalPts ? b : a) : null;
+  const worstThisYear = thisYearRounds.length ? thisYearRounds.reduce((a,b) => b.totalPts < a.totalPts ? b : a) : null;
+
   // 3-putt streak: how many of the most recent rounds (within the current
   // range) had at least one 3-putt — lets advice say "your last 3 rounds"
   // instead of only an all-time rate.
@@ -4153,6 +4161,36 @@ function PerformanceScreen({ user, onBack }) {
           <span style={{ fontSize: 9.5, color: C.steel, fontWeight: 600 }}>Needs work</span>
         </div>
       </div>
+
+      {/* Best and Worst Round This Year */}
+      {thisYearRounds.length > 0 && (
+        <div style={{ margin: "0 18px 18px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".07em", textTransform: "uppercase", color: C.steel, marginBottom: 10 }}>
+            {thisYear} — Best & Worst Round
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[
+              { label: "Best Round", round: bestThisYear, color: "#1B7A3D", icon: <Icon.TrendDown /> },
+              { label: "Worst Round", round: worstThisYear, color: "#C8392D", icon: <Icon.TrendUp /> },
+            ].map(({ label, round: r, color, icon }) => r && (
+              <div key={label} style={{ background: C.white, border: `1px solid ${C.line}`, padding: "14px 14px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 8 }}>
+                  <div style={{ width: 13, height: 13, color }}>{icon}</div>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color }}>{label}</div>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: C.black }}>{r.totalPts} <span style={{ fontSize: 11, fontWeight: 600, color: C.steel }}>pts</span></div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.steel, marginTop: 1 }}>{r.totalGross} strokes</div>
+                <div style={{ fontSize: 10.5, color: C.ash, marginTop: 6, lineHeight: 1.4 }}>
+                  {r.courseName}
+                </div>
+                <div style={{ fontSize: 10, color: C.ash, marginTop: 2 }}>
+                  {new Date(r.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {trend != null && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 18px 18px", padding: "12px 16px", background: C.white, border: `1px solid ${C.line}` }}>
