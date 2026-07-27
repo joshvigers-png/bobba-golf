@@ -3965,7 +3965,7 @@ function CompetitionScreen({ user, onBack }) {
             {recent.map(c => (
               <div key={c.id} className="course-row" onClick={() => { setDetailComp(c); setView("detail"); }} style={{ cursor: "pointer" }}>
                 <div style={{ flex: 1 }}>
-                  <div className="course-name">{c.courseName}</div>
+                  <div className="course-name">{c.gameName || c.courseName}</div>
                   <div className="course-loc">{new Date(c.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {COMP_FORMATS.find(f=>f.id===c.format)?.label} · {c.players.length}-ball</div>
                 </div>
                 <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
@@ -4051,7 +4051,7 @@ function CompetitionScreen({ user, onBack }) {
         ) : sorted.map(c => (
           <div key={c.id} className="course-row" onClick={() => { setDetailComp(c); setView("detail"); }} style={{ cursor: "pointer" }}>
             <div style={{ flex: 1 }}>
-              <div className="course-name">{c.courseName}</div>
+              <div className="course-name">{c.gameName || c.courseName}</div>
               <div className="course-loc">{new Date(c.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {COMP_FORMATS.find(f=>f.id===c.format)?.label} · {c.players.length}-ball</div>
               <div className="course-loc" style={{ marginTop: 2 }}>{c.players.map(p=>p.name).join(", ")}</div>
             </div>
@@ -4068,6 +4068,7 @@ function CompetitionScreen({ user, onBack }) {
 // ─── Competition Setup Flow ────────────────────────────────────────────────────
 function CompSetupFlow({ onBack, onNext }) {
   const [ballCount, setBallCount] = useState(2);
+  const [gameName, setGameName] = useState("");
   const [format, setFormat] = useState("stableford");
   const [players, setPlayers] = useState([
     { id: 1, name: "", handicap: "" },
@@ -4089,9 +4090,11 @@ function CompSetupFlow({ onBack, onNext }) {
   };
 
   const handleNext = () => {
+    if (!gameName.trim()) { setError("Please enter a game name."); return; }
     if (players.some(p => !p.name.trim())) { setError("Please enter a name for every player."); return; }
     setError("");
     onNext({
+      gameName: gameName.trim(),
       format,
       ballCount,
       players: players.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
@@ -4112,6 +4115,12 @@ function CompSetupFlow({ onBack, onNext }) {
       </div>
 
       <div style={{ padding: "0 18px" }}>
+        {/* Game Name */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Game Name</label>
+          <input className="input" placeholder="e.g. Saturday Medal, Walsall Trip" value={gameName} onChange={e => setGameName(e.target.value)} />
+        </div>
+
         {/* Ball count */}
         <div className="field" style={{ marginBottom: 20 }}>
           <label className="field-label">Number of Players</label>
@@ -4390,7 +4399,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
           <div style={{ width: 18, height: 18, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div>
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: C.white }}>{comp.courseName}</div>
+          <div style={{ fontWeight: 800, fontSize: 14, color: C.white }}>{comp.gameName || comp.courseName}</div>
           <div style={{ fontSize: 10, color: "rgba(255,255,255,.5)" }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · Hole {currentHole}/18</div>
         </div>
         <button onClick={() => setShowLeaderboard(true)} style={{ background: "rgba(255,255,255,.12)", border: "none", color: C.white, padding: "6px 12px", fontWeight: 800, fontSize: 11, cursor: "pointer", borderRadius: 4 }}>
@@ -4533,8 +4542,8 @@ function CompDetailView({ comp, onBack, onResume }) {
         </button>
         <div style={{ position: "relative", zIndex: 1 }}>
           <div className="page-head-eyebrow">{COMP_FORMATS.find(f=>f.id===comp.format)?.label}</div>
-          <h1 style={{ fontSize: 22 }}>{comp.courseName}</h1>
-          <p>{new Date(comp.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
+          <h1 style={{ fontSize: 22 }}>{comp.gameName || comp.courseName}</h1>
+          <p style={{ marginTop: 2 }}>{comp.gameName ? comp.courseName + " · " : ""}{new Date(comp.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
         </div>
       </div>
 
