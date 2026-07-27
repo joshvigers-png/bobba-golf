@@ -2200,16 +2200,18 @@ function ScanScorecardStep({ onBack, onConfirm, proxyUrl, existingCourse }) {
 {
   "tees": [
     { "name": "White", "rating": 70.0, "slope": 120 },
-    { "name": "Yellow", "rating": 68.5, "slope": 116 }
+    { "name": "Yellow", "rating": 68.5, "slope": 116 },
+    { "name": "Red", "rating": 71.2, "slope": 118 }
   ],
   "holes": [
-    { "n": 1, "par": 4, "si": 7, "yds": { "white": 420, "yellow": 398 } }
+    { "n": 1, "par": 4, "si": 7, "yds": { "white": 420, "yellow": 398, "red": 356 } }
   ]
 }
 Rules:
-- Include all tee colours you can see (White, Yellow, Red, Blue etc)
-- If you cannot read a value clearly, use null
-- si = stroke index (the handicap column on the scorecard)
+- Include ALL tee colours you can see (White, Yellow, Red, Blue, Orange etc)
+- For each tee, extract the Course Rating (SSS or CR, usually a number like 69.4 or 71) and Slope Rating (usually 100-155, sometimes labelled "Slope"). These are typically printed at the top or bottom of the scorecard near the tee colour row, or in a summary box. Look carefully for labels like "Course Rating", "CR", "SSS", "Slope", "Slope Rating", "SR".
+- If you cannot find or read a rating/slope value clearly, use null — do not guess
+- si = stroke index (the handicap/index column on the scorecard, numbered 1-18)
 - yds keys must be lowercase tee colour names matching the tees array names
 - Return all 18 holes even if some values are null
 - Return ONLY the JSON, nothing else` }
@@ -2283,6 +2285,20 @@ Rules:
         {scanned && (
           <div style={{ marginTop: 8 }}>
             <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12 }}>Extracted Data — {scanned.holes.length} holes</div>
+              {scanned.tees.length > 0 && (
+                <div style={{ background: C.white, border: `1px solid ${C.line}`, marginBottom: 10, overflow: "hidden" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "8px 12px", background: C.cloud, borderBottom: `1px solid ${C.line}` }}>
+                    {["Tee", "Rating", "Slope"].map(h => <div key={h} style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: C.steel }}>{h}</div>)}
+                  </div>
+                  {scanned.tees.map((t, i) => (
+                    <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "7px 12px", borderBottom: `1px solid ${C.line}`, fontSize: 12 }}>
+                      <div style={{ fontWeight: 700 }}>{t.name}</div>
+                      <div style={{ color: t.rating ? C.black : C.ash }}>{t.rating ?? "—"}</div>
+                      <div style={{ color: t.slope ? C.black : C.ash }}>{t.slope ?? "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             <div style={{ background: C.white, border: `1px solid ${C.line}`, marginBottom: 16, overflow: "hidden" }}>
               <div style={{ display: "grid", gridTemplateColumns: "32px 36px 36px auto", padding: "8px 12px", background: C.cloud, borderBottom: `1px solid ${C.line}` }}>
                 {["Hole","Par","SI","Yardages"].map(h => <div key={h} style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: C.steel }}>{h}</div>)}
