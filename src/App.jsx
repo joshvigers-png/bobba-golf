@@ -4411,16 +4411,48 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
       {comp.players.map(player => {
         const gross = parseInt(getScore(player.id, "strokes"));
         const pts = playerPts(player, hole);
-        const ptColor = pts == null ? C.steel : pts >= 2 ? "#1B7A3D" : pts === 1 ? "#E08A1E" : "#C8392D";
+        const net = netScore(player, hole);
+        const shotsOnHole = strokesReceived(player.handicap, hole.si);
+
+        // Match play hole winner indicator
+        const matchHoleResult = () => {
+          if (comp.format !== "matchplay" || comp.ballCount !== 2) return null;
+          const [p1, p2] = comp.players;
+          const n1 = netScore(p1, hole), n2 = netScore(p2, hole);
+          if (n1 == null || n2 == null) return null;
+          if (n1 === n2) return "halved";
+          if (player.id === p1.id) return n1 < n2 ? "won" : "lost";
+          return n2 < n1 ? "won" : "lost";
+        };
+        const holeResult = matchHoleResult();
+
         return (
           <div key={player.id} style={{ margin: "0 18px 12px", background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <div>
                 <div style={{ fontWeight: 800, fontSize: 14 }}>{player.name}</div>
-                <div style={{ fontSize: 11, color: C.steel }}>HCP {player.handicap}</div>
+                <div style={{ fontSize: 11, color: C.steel }}>
+                  HCP {player.handicap}
+                  {comp.format !== "stroke" && shotsOnHole > 0 && (
+                    <span style={{ marginLeft: 6, fontWeight: 700, color: "#1B7A3D" }}>+{shotsOnHole} shot{shotsOnHole !== 1 ? "s" : ""} this hole</span>
+                  )}
+                </div>
               </div>
-              {pts != null && <div className="hole-pts-badge" style={{ background: holePtsColor(pts), color: holePtsTextColor(pts) }}>{pts}</div>}
+              {/* Badge — format specific */}
+              {comp.format === "stableford" && pts != null && (
+                <div className="hole-pts-badge" style={{ background: holePtsColor(pts), color: holePtsTextColor(pts) }}>{pts}</div>
+              )}
+              {comp.format === "matchplay" && holeResult && (
+                <div style={{ padding: "4px 10px", fontWeight: 800, fontSize: 11, borderRadius: 20, background: holeResult === "won" ? "#1B7A3D" : holeResult === "lost" ? "#C8392D" : C.cloud, color: holeResult === "halved" ? C.steel : C.white }}>
+                  {holeResult === "won" ? "Hole won" : holeResult === "lost" ? "Hole lost" : "Halved"}
+                </div>
+              )}
+              {comp.format === "stroke" && gross > 0 && (
+                <div style={{ fontWeight: 900, fontSize: 20, color: C.black }}>{gross}</div>
+              )}
             </div>
+
+            {/* Strokes stepper — all formats */}
             <div style={{ display: "flex", gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Strokes</div>
@@ -4430,14 +4462,22 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
                   <button className="stepper-btn" onClick={() => updateScore(player.id, "strokes", (gross||0)+1)}><Icon.Plus /></button>
                 </div>
               </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Putts</div>
-                <div className="stepper">
-                  <button className="stepper-btn" onClick={() => updateScore(player.id, "putts", Math.max(0, (parseInt(getScore(player.id,"putts"))||0)-1))}><Icon.Minus /></button>
-                  <div className="stepper-val">{getScore(player.id,"putts") ?? "—"}</div>
-                  <button className="stepper-btn" onClick={() => updateScore(player.id, "putts", (parseInt(getScore(player.id,"putts"))||0)+1)}><Icon.Plus /></button>
+
+              {/* Net score display for match play */}
+              {comp.format === "matchplay" && gross > 0 && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Net Score</div>
+                  <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: C.cloud, fontWeight: 900, fontSize: 20 }}>{net}</div>
                 </div>
-              </div>
+              )}
+
+              {/* Points display for Stableford — auto-calculated, not editable */}
+              {comp.format === "stableford" && gross > 0 && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Points</div>
+                  <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: holePtsColor(pts), fontWeight: 900, fontSize: 20, color: holePtsTextColor(pts) }}>{pts ?? "—"}</div>
+                </div>
+              )}
             </div>
           </div>
         );
