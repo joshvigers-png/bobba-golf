@@ -3899,6 +3899,8 @@ function CompetitionScreen({ user, onBack }) {
   const [detailComp, setDetailComp] = useState(null);
 
   const persist = (next) => { setComps(next); LS.set(compsKey(user.id), next); };
+  const deleteComp = (id) => persist(comps.filter(c => c.id !== id));
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const saveComp = (comp) => {
     const next = [...comps, comp];
@@ -3963,15 +3965,40 @@ function CompetitionScreen({ user, onBack }) {
           <>
             <div className="section-head"><span className="section-title">Recent Games</span></div>
             {recent.map(c => (
-              <div key={c.id} className="course-row" onClick={() => { setDetailComp(c); setView("detail"); }} style={{ cursor: "pointer" }}>
-                <div style={{ flex: 1 }}>
+              <div key={c.id} className="course-row" style={{ cursor: "default" }}>
+                <div style={{ flex: 1, cursor: "pointer" }} onClick={() => { setDetailComp(c); setView("detail"); }}>
                   <div className="course-name">{c.gameName || c.courseName}</div>
                   <div className="course-loc">{new Date(c.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {COMP_FORMATS.find(f=>f.id===c.format)?.label} · {c.players.length}-ball</div>
                 </div>
-                <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <div style={{ width: 15, height: 15, color: C.fog, cursor: "pointer" }} onClick={() => { setDetailComp(c); setView("detail"); }}><Icon.ChevronRight /></div>
+                  <button onClick={() => setDeleteTarget(c)} style={{ width: 30, height: 30, borderRadius: "50%", background: "#FCE9E7", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                    <div style={{ width: 13, height: 13, color: C.red }}><Icon.Trash /></div>
+                  </button>
+                </div>
               </div>
             ))}
           </>
+        )}
+
+        {/* Delete confirmation modal */}
+        {deleteTarget && (
+          <div className="sheet-overlay" onClick={() => setDeleteTarget(null)}>
+            <div className="sheet" onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#FCE9E7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <div style={{ width: 20, height: 20, color: C.red }}><Icon.Trash /></div>
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Delete Game?</div>
+              <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+                "{deleteTarget.gameName || deleteTarget.courseName}" will be permanently deleted. This can't be undone.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 1, background: C.red, borderColor: C.red }} onClick={() => { deleteComp(deleteTarget.id); setDeleteTarget(null); }}>Delete</button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -4051,15 +4078,40 @@ function CompetitionScreen({ user, onBack }) {
             <div className="empty-sub">Start a new game to see it here.</div>
           </div>
         ) : sorted.map(c => (
-          <div key={c.id} className="course-row" onClick={() => { setDetailComp(c); setView("detail"); }} style={{ cursor: "pointer" }}>
-            <div style={{ flex: 1 }}>
+          <div key={c.id} className="course-row" style={{ cursor: "default" }}>
+            <div style={{ flex: 1, cursor: "pointer" }} onClick={() => { setDetailComp(c); setView("detail"); }}>
               <div className="course-name">{c.gameName || c.courseName}</div>
               <div className="course-loc">{new Date(c.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {COMP_FORMATS.find(f=>f.id===c.format)?.label} · {c.players.length}-ball</div>
               <div className="course-loc" style={{ marginTop: 2 }}>{c.players.map(p=>p.name).join(", ")}</div>
             </div>
-            <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <div style={{ width: 15, height: 15, color: C.fog, cursor: "pointer" }} onClick={() => { setDetailComp(c); setView("detail"); }}><Icon.ChevronRight /></div>
+              <button onClick={() => setDeleteTarget(c)} style={{ width: 30, height: 30, borderRadius: "50%", background: "#FCE9E7", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                <div style={{ width: 13, height: 13, color: C.red }}><Icon.Trash /></div>
+              </button>
+            </div>
           </div>
         ))}
+
+        {/* Delete confirmation modal — shared between home and history views */}
+        {deleteTarget && (
+          <div className="sheet-overlay" onClick={() => setDeleteTarget(null)}>
+            <div className="sheet" onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#FCE9E7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <div style={{ width: 20, height: 20, color: C.red }}><Icon.Trash /></div>
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Delete Game?</div>
+              <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+                "{deleteTarget.gameName || deleteTarget.courseName}" will be permanently deleted. This can't be undone.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 1, background: C.red, borderColor: C.red }} onClick={() => { deleteComp(deleteTarget.id); setDeleteTarget(null); }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
