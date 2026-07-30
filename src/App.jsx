@@ -3927,7 +3927,7 @@ function CompetitionScreen({ user, onBack }) {
         </div>
 
         <div style={{ padding: "0 18px 18px" }}>
-          <button className="btn btn-primary" style={{ marginBottom: 10 }} onClick={() => setView("setup")}>
+          <button className="btn btn-primary" style={{ marginBottom: 10 }} onClick={() => setView("course")}>
             + New Game
           </button>
           <button className="btn btn-outline" onClick={() => setView("history")}>
@@ -3977,29 +3977,31 @@ function CompetitionScreen({ user, onBack }) {
     );
   }
 
-  // ── Setup: players + format + side games ──
-  if (view === "setup") {
-    return <CompSetupFlow
+  // ── Course selection first ──
+  if (view === "course") {
+    return <CompCourseFlow
       onBack={() => setView("home")}
-      onNext={(draft) => { setActiveComp(draft); setView("course"); }}
+      onNext={(course) => {
+        setActiveComp({ course, courseName: course.name, courseId: course.id });
+        setView("setup");
+      }}
     />;
   }
 
-  // ── Course selection ──
-  if (view === "course") {
-    return <CompCourseFlow
-      onBack={() => setView("setup")}
-      onNext={(course) => {
+  // ── Setup: game name + players + format ──
+  if (view === "setup") {
+    return <CompSetupFlow
+      onBack={() => setView("course")}
+      courseName={activeComp?.courseName || ""}
+      onNext={(draft) => {
         const comp = {
           ...activeComp,
+          ...draft,
           id: Date.now(),
-          courseId: course.id,
-          courseName: course.name,
-          course,
           createdAt: Date.now(),
           completed: false,
-          scores: {}, // { playerId: { holeN: { strokes, putts } } }
-          sideGameWinners: {}, // { nearestPin: {hole,winner}, nearestIn2: {hole,winner}, longestDrive: {hole,winner} }
+          scores: {},
+          sideGameWinners: {},
         };
         setActiveComp(comp);
         saveComp(comp);
@@ -4066,15 +4068,14 @@ function CompetitionScreen({ user, onBack }) {
 }
 
 // ─── Competition Setup Flow ────────────────────────────────────────────────────
-function CompSetupFlow({ onBack, onNext }) {
-  const [ballCount, setBallCount] = useState(2);
+function CompSetupFlow({ onBack, onNext, courseName }) {
   const [gameName, setGameName] = useState("");
+  const [ballCount, setBallCount] = useState(2);
   const [format, setFormat] = useState("stableford");
   const [players, setPlayers] = useState([
     { id: 1, name: "", handicap: "" },
     { id: 2, name: "", handicap: "" },
   ]);
-  const [sideGames, setSideGames] = useState({ nearestPin: false, nearestIn2: false, longestDrive: false });
   const [error, setError] = useState("");
 
   const updateBallCount = (n) => {
@@ -4098,7 +4099,7 @@ function CompSetupFlow({ onBack, onNext }) {
       format,
       ballCount,
       players: players.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
-      sideGames,
+      sideGames: { nearestPin: false, nearestIn2: false, longestDrive: false },
     });
   };
 
@@ -4109,8 +4110,8 @@ function CompSetupFlow({ onBack, onNext }) {
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div style={{ position: "relative", zIndex: 1 }}>
-          <div className="page-head-eyebrow">New Game</div>
-          <h1>Set Up</h1>
+          <div className="page-head-eyebrow">New Game · {courseName}</div>
+          <h1>Game Setup</h1>
         </div>
       </div>
 
@@ -4121,7 +4122,7 @@ function CompSetupFlow({ onBack, onNext }) {
           <input className="input" placeholder="e.g. Saturday Medal, Walsall Trip" value={gameName} onChange={e => setGameName(e.target.value)} />
         </div>
 
-        {/* Ball count */}
+        {/* Number of players */}
         <div className="field" style={{ marginBottom: 20 }}>
           <label className="field-label">Number of Players</label>
           <div style={{ display: "flex", gap: 8 }}>
@@ -4133,9 +4134,20 @@ function CompSetupFlow({ onBack, onNext }) {
           </div>
         </div>
 
+        {/* Players + handicaps */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Players & Handicaps</label>
+          {players.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input className="input" style={{ flex: 2 }} placeholder={`Player ${i + 1} name`} value={p.name} onChange={e => updatePlayer(i, "name", e.target.value)} />
+              <input className="input" style={{ flex: 1 }} placeholder="HCP" type="number" step="0.1" value={p.handicap} onChange={e => updatePlayer(i, "handicap", e.target.value)} />
+            </div>
+          ))}
+        </div>
+
         {/* Format */}
         <div className="field" style={{ marginBottom: 20 }}>
-          <label className="field-label">Format</label>
+          <label className="field-label">Game Format</label>
           {COMP_FORMATS.filter(f => !(f.id === "matchplay" && ballCount === 3)).map(f => (
             <div key={f.id} onClick={() => setFormat(f.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", marginBottom: 6, border: `1.5px solid ${format === f.id ? C.black : C.line}`, background: format === f.id ? C.black : C.white, cursor: "pointer" }}>
               <div style={{ flex: 1 }}>
@@ -4147,34 +4159,8 @@ function CompSetupFlow({ onBack, onNext }) {
           ))}
         </div>
 
-        {/* Players */}
-        <div className="field" style={{ marginBottom: 20 }}>
-          <label className="field-label">Players</label>
-          {players.map((p, i) => (
-            <div key={p.id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <input className="input" style={{ flex: 2 }} placeholder={`Player ${i + 1} name`} value={p.name} onChange={e => updatePlayer(i, "name", e.target.value)} />
-              <input className="input" style={{ flex: 1 }} placeholder="HCP" type="number" step="0.1" value={p.handicap} onChange={e => updatePlayer(i, "handicap", e.target.value)} />
-            </div>
-          ))}
-        </div>
-
-        {/* Side games */}
-        <div className="field" style={{ marginBottom: 20 }}>
-          <label className="field-label">Side Games <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional</span></label>
-          {[
-            { key: "nearestPin", label: "Nearest the Pin" },
-            { key: "nearestIn2", label: "Nearest the Pin in 2" },
-            { key: "longestDrive", label: "Longest Drive" },
-          ].map(({ key, label }) => (
-            <div key={key} onClick={() => setSideGames(s => ({ ...s, [key]: !s[key] }))} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", marginBottom: 6, border: `1.5px solid ${sideGames[key] ? C.black : C.line}`, background: sideGames[key] ? C.black : C.white, cursor: "pointer" }}>
-              <span style={{ fontWeight: 700, fontSize: 13, color: sideGames[key] ? C.white : C.black }}>{label}</span>
-              {sideGames[key] && <div style={{ width: 18, height: 18, color: C.white }}><Icon.Check /></div>}
-            </div>
-          ))}
-        </div>
-
         {error && <p style={{ fontSize: 12, color: C.red, marginBottom: 10 }}>{error}</p>}
-        <button className="btn btn-primary" onClick={handleNext}>Find a Course →</button>
+        <button className="btn btn-primary" onClick={handleNext}>Start Game</button>
       </div>
     </div>
   );
