@@ -4771,18 +4771,119 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
 function CompDetailView({ comp, onBack, onResume }) {
   const course = comp.course;
   const holes = course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}}));
+  const front = holes.slice(0, 9);
+  const back = holes.slice(9, 18);
+  const scores = comp.scores || {};
 
+  const playerPts = (player, h) => {
+    const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+    if (!gross) return null;
+    return stablefordPts(gross, h.par, player.handicap, scores[player.id]?.[h.n]?.si ?? h.si);
+  };
+  const netScore = (player, h) => {
+    const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+    if (!gross) return null;
+    return gross - strokesReceived(player.handicap, h.si);
+  };
+  const holeWinner = (h) => {
+    if (comp.format !== "matchplay" || comp.ballCount !== 2) return null;
+    const [p1, p2] = comp.players;
+    const n1 = netScore(p1, h), n2 = netScore(p2, h);
+    if (n1 == null || n2 == null) return null;
+    if (n1 === n2) return "half";
+    return n1 < n2 ? p1.id : p2.id;
+  };
   const playerTotal = (player, field) => {
-    if (field === "strokes") return holes.reduce((s,h) => s + (parseInt(comp.scores?.[player.id]?.[h.n]?.strokes)||0), 0);
-    if (field === "pts") return holes.reduce((s,h) => {
-      const gross = parseInt(comp.scores?.[player.id]?.[h.n]?.strokes);
-      if (!gross) return s;
-      return s + (stablefordPts(gross, h.par, player.handicap, comp.scores?.[player.id]?.[h.n]?.si ?? h.si) || 0);
-    }, 0);
+    if (field === "strokes") return holes.reduce((s,h) => s + (parseInt(scores[player.id]?.[h.n]?.strokes)||0), 0);
+    if (field === "pts") return holes.reduce((s,h) => s + (playerPts(player,h)||0), 0);
     return 0;
   };
 
+  // ── Match play result ──
+  const matchResult = (() => {
+    if (comp.format !== "matchplay" || comp.ballCount !== 2) return null;
+    const [p1, p2] = comp.players;
+    let p1w = 0, p2w = 0, halved = 0;
+    let closedResult = null;
+    holes.forEach((h, i) => {
+      const n1 = netScore(p1, h), n2 = netScore(p2, h);
+      if (n1 == null || n2 == null) return;
+      if (n1 < n2) p1w++;
+      else if (n2 < n1) p2w++;
+      else halved++;
+      const holesLeft = 17 - i;
+      const diff = p1w - p2w;
+      if (Math.abs(diff) > holesLeft && !closedResult) {
+        const holesRem = 18 - h.n;
+        const by = Math.abs(diff);
+        const winner = diff > 0 ? p1.name : p2.name;
+        closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
+      }
+    });
+    const diff = p1w - p2w;
+    const allPlayed = holes.every(h => comp.players.every(p => scores[p.id]?.[h.n]?.strokes));
+    if (allPlayed && !closedResult) {
+      closedResult = diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`;
+    }
+    return { p1w, p2w, halved, diff, closedResult, p1, p2 };
+  })();
+
   const sideGameLabels = { nearestPin: "Nearest the Pin", nearestIn2: "Nearest in 2", longestDrive: "Longest Drive" };
+
+  const HoleGrid = ({ holeSet, label }) => (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, tableLayout: "fixed", minWidth: 340 }}>
+        <thead>
+          <tr style={{ background: C.black }}>
+            <td style={{ padding: "5px 8px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", width: 52 }}>{label}</td>
+            {holeSet.map(h => <td key={h.n} style={{ padding: "5px 3px", fontWeight: 800, fontSize: 10, color: C.white, textAlign: "center", width: 24 }}>{h.n}</td>)}
+            <td style={{ padding: "5px 4px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", textAlign: "center", width: 32 }}>Tot</td>
+          </tr>
+          <tr style={{ background: C.charcoal }}>
+            <td style={{ padding: "3px 8px", fontSize: 8.5, color: C.ash }}>Par</td>
+            {holeSet.map(h => <td key={h.n} style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{h.par}</td>)}
+            <td style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{holeSet.reduce((s,h)=>s+h.par,0)}</td>
+          </tr>
+        </thead>
+        <tbody>
+          {comp.players.map((player, pi) => {
+            const grossTotal = holeSet.reduce((s,h) => s + (parseInt(scores[player.id]?.[h.n]?.strokes)||0), 0);
+            const ptsTotal = holeSet.reduce((s,h) => s + (playerPts(player,h)||0), 0);
+            return (
+              <tr key={player.id} style={{ background: pi % 2 === 0 ? C.white : C.paper }}>
+                <td style={{ padding: "4px 8px", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div>{player.name}</div>
+                  {comp.format !== "stroke" && <div style={{ fontSize: 8.5, color: C.ash }}>pts/net</div>}
+                </td>
+                {holeSet.map(h => {
+                  const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+                  const pts = playerPts(player, h);
+                  const net = netScore(player, h);
+                  const winner = holeWinner(h);
+                  const won = winner === player.id;
+                  const half = winner === "half";
+                  const lost = winner && !won && winner !== "half";
+                  const cellBg = !gross ? "transparent" : won ? "#1B7A3D" : half ? "#E08A1E" : lost ? "#C8392D" : "transparent";
+                  const cellColor = (won || half || lost) && gross ? C.white : C.black;
+                  const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
+                  return (
+                    <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg }}>
+                      <div style={{ fontWeight: 800, fontSize: 10, color: cellColor }}>{gross || ""}</div>
+                      {comp.format !== "stroke" && <div style={{ fontWeight: 700, fontSize: 8.5, color: gross ? (won || half || lost ? "rgba(255,255,255,.7)" : C.steel) : C.ash }}>{gross ? (secondary ?? "0") : ""}</div>}
+                    </td>
+                  );
+                })}
+                <td style={{ padding: "4px", textAlign: "center" }}>
+                  <div style={{ fontWeight: 900, fontSize: 11 }}>{grossTotal || "—"}</div>
+                  {comp.format !== "stroke" && <div style={{ fontWeight: 700, fontSize: 9, color: C.steel }}>{ptsTotal || ""}</div>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
@@ -4797,26 +4898,51 @@ function CompDetailView({ comp, onBack, onResume }) {
         </div>
       </div>
 
-      {/* Results summary */}
-      <div style={{ margin: "0 18px 18px" }}>
-        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>Results</div>
-        {comp.players.map((p, i) => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 6 }}>
-            <div style={{ width: 32, height: 32, borderRadius: "50%", background: i === 0 ? C.black : C.cloud, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: i === 0 ? C.white : C.steel, flexShrink: 0 }}>{i+1}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
-              <div style={{ fontSize: 11, color: C.steel }}>HCP {p.handicap}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>{playerTotal(p,"strokes") || "—"}</div>
-              <div style={{ fontSize: 10, color: C.steel }}>strokes</div>
-            </div>
-            <div style={{ textAlign: "right", minWidth: 40 }}>
-              <div style={{ fontWeight: 800, fontSize: 16, color: "#1B7A3D" }}>{playerTotal(p,"pts")}</div>
-              <div style={{ fontSize: 10, color: C.steel }}>pts</div>
-            </div>
+      {/* Match result banner */}
+      {matchResult?.closedResult && (
+        <div style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.black, textAlign: "center" }}>
+          <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 6 }}>Result</div>
+          <div style={{ fontWeight: 900, fontSize: 22, color: C.white }}>{matchResult.closedResult}</div>
+        </div>
+      )}
+
+      {/* Non-matchplay result summary */}
+      {comp.format !== "matchplay" && (() => {
+        const sorted = [...comp.players].map(p => ({ ...p, strokes: playerTotal(p,"strokes"), pts: playerTotal(p,"pts") }))
+          .sort((a,b) => comp.format === "stableford" ? b.pts - a.pts : (a.strokes||999) - (b.strokes||999));
+        return (
+          <div style={{ margin: "0 18px 18px" }}>
+            {sorted.map((p, i) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 6 }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", background: i === 0 ? C.black : C.cloud, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: i === 0 ? C.white : C.steel, flexShrink: 0 }}>{i+1}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>HCP {p.handicap}</div>
+                </div>
+                <div style={{ textAlign: "right", marginRight: 8 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{p.strokes || "—"}</div>
+                  <div style={{ fontSize: 10, color: C.steel }}>strokes</div>
+                </div>
+                {comp.format === "stableford" && (
+                  <div style={{ textAlign: "right", minWidth: 36 }}>
+                    <div style={{ fontWeight: 800, fontSize: 16, color: "#1B7A3D" }}>{p.pts}</div>
+                    <div style={{ fontSize: 10, color: C.steel }}>pts</div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+        );
+      })()}
+
+      {/* Scorecard grids */}
+      <div style={{ margin: "0 18px 6px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
+      <div style={{ margin: "0 18px 14px", border: `1px solid ${C.line}`, overflow: "hidden" }}>
+        <HoleGrid holeSet={front} label="Player" />
+      </div>
+      <div style={{ margin: "0 18px 6px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
+      <div style={{ margin: "0 18px 18px", border: `1px solid ${C.line}`, overflow: "hidden" }}>
+        <HoleGrid holeSet={back} label="Player" />
       </div>
 
       {/* Side game winners */}
