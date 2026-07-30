@@ -4463,19 +4463,19 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
                 </div>
               </div>
 
-              {/* Net score display for match play */}
-              {comp.format === "matchplay" && gross > 0 && (
+              {/* Net score display for match play — always visible, updates as strokes entered */}
+              {comp.format === "matchplay" && (
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Net Score</div>
-                  <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: C.cloud, fontWeight: 900, fontSize: 20 }}>{net}</div>
+                  <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: C.cloud, fontWeight: 900, fontSize: 20 }}>{net ?? "—"}</div>
                 </div>
               )}
 
-              {/* Points display for Stableford — auto-calculated, not editable */}
-              {comp.format === "stableford" && gross > 0 && (
+              {/* Points display for Stableford — always visible, auto-calculated from strokes */}
+              {comp.format === "stableford" && (
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginBottom: 6 }}>Points</div>
-                  <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: holePtsColor(pts), fontWeight: 900, fontSize: 20, color: holePtsTextColor(pts) }}>{pts ?? "—"}</div>
+                  <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: gross ? holePtsColor(pts) : C.cloud, fontWeight: 900, fontSize: 20, color: gross ? holePtsTextColor(pts) : C.ash }}>{gross ? (pts ?? "0") : "—"}</div>
                 </div>
               )}
             </div>
@@ -4515,30 +4515,202 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
       </div>
 
       {/* Leaderboard sheet */}
-      {showLeaderboard && (
-        <div className="sheet-overlay" onClick={() => setShowLeaderboard(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
-            <div className="sheet-handle" />
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Leaderboard</div>
-            <div style={{ fontSize: 11, color: C.steel, marginBottom: 16 }}>After {currentHole - 1} hole{currentHole - 1 !== 1 ? "s" : ""}</div>
-            {lb.filter(p => !p.isStatus).map((p, i) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: i === 0 ? C.black : C.cloud, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, color: i === 0 ? C.white : C.steel, flexShrink: 0 }}>{i+1}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: C.steel }}>{p.label}</div>
-                </div>
-              </div>
-            ))}
-            {lb.find(p => p.isStatus) && (
-              <div style={{ marginTop: 12, padding: "10px 14px", background: C.cloud, fontWeight: 700, fontSize: 13, textAlign: "center" }}>
-                {lb.find(p => p.isStatus).name}
-              </div>
-            )}
-            <button className="btn btn-primary" style={{ marginTop: 18 }} onClick={() => setShowLeaderboard(false)}>Close</button>
+      {showLeaderboard && (() => {
+        const playedHoles = holes.filter(h => comp.players.every(p => scores[p.id]?.[h.n]?.strokes));
+        const holesPlayed = playedHoles.length;
+
+        // ── Match play result calculation ──
+        const matchResult = (() => {
+          if (comp.format !== "matchplay" || comp.ballCount !== 2) return null;
+          const [p1, p2] = comp.players;
+          let p1w = 0, p2w = 0, halved = 0;
+          let closedAtHole = null, closedResult = null;
+          holes.forEach((h, i) => {
+            const n1 = netScore(p1, h), n2 = netScore(p2, h);
+            if (n1 == null || n2 == null) return;
+            if (n1 < n2) p1w++;
+            else if (n2 < n1) p2w++;
+            else halved++;
+            // Check if match is already mathematically over
+            const holesLeft = 17 - i; // holes remaining after this one
+            const diff = p1w - p2w;
+            if (Math.abs(diff) > holesLeft && !closedAtHole) {
+              closedAtHole = h.n;
+              const holesRem = 18 - h.n; // holes left in round
+              const by = Math.abs(diff);
+              const winner = diff > 0 ? p1.name : p2.name;
+              closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
+            }
+          });
+          const diff = p1w - p2w;
+          const allPlayed = holesPlayed === 18;
+          const finalResult = allPlayed && !closedResult
+            ? (diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`)
+            : null;
+          return { p1w, p2w, halved, diff, closedAtHole, closedResult: closedResult || finalResult, p1, p2 };
+        })();
+
+        // ── Per-hole result for grid colouring ──
+        const holeWinner = (h) => {
+          if (comp.format === "matchplay" && comp.ballCount === 2) {
+            const [p1, p2] = comp.players;
+            const n1 = netScore(p1, h), n2 = netScore(p2, h);
+            if (n1 == null || n2 == null) return null;
+            if (n1 === n2) return "half";
+            return n1 < n2 ? p1.id : p2.id;
+          }
+          return null;
+        };
+
+        const front = holes.slice(0, 9);
+        const back = holes.slice(9, 18);
+
+        const HoleRow = ({ label, holeSet }) => (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, tableLayout: "fixed", minWidth: 340 }}>
+              <thead>
+                <tr style={{ background: C.black }}>
+                  <td style={{ padding: "5px 8px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", width: 52 }}>{label}</td>
+                  {holeSet.map(h => (
+                    <td key={h.n} style={{ padding: "5px 3px", fontWeight: 800, fontSize: 10, color: C.white, textAlign: "center", width: 24 }}>{h.n}</td>
+                  ))}
+                  <td style={{ padding: "5px 4px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", textAlign: "center", width: 32 }}>Tot</td>
+                </tr>
+                <tr style={{ background: C.charcoal }}>
+                  <td style={{ padding: "3px 8px", fontSize: 8.5, color: C.ash }}>Par</td>
+                  {holeSet.map(h => (
+                    <td key={h.n} style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{h.par}</td>
+                  ))}
+                  <td style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{holeSet.reduce((s,h)=>s+h.par,0)}</td>
+                </tr>
+              </thead>
+              <tbody>
+                {comp.players.map((player, pi) => {
+                  const grossTotal = holeSet.reduce((s,h) => s + (parseInt(scores[player.id]?.[h.n]?.strokes)||0), 0);
+                  const ptsTotal = holeSet.reduce((s,h) => s + (playerPts(player,h)||0), 0);
+                  return (
+                    <tr key={player.id} style={{ background: pi % 2 === 0 ? C.white : C.paper }}>
+                      <td style={{ padding: "4px 8px", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div>{player.name}</div>
+                        {comp.format !== "stroke" && <div style={{ fontSize: 8.5, color: C.ash }}>pts/net</div>}
+                      </td>
+                      {holeSet.map(h => {
+                        const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+                        const pts = playerPts(player, h);
+                        const net = netScore(player, h);
+                        const winner = holeWinner(h);
+                        const won = winner === player.id;
+                        const half = winner === "half";
+                        const lost = winner && !won && winner !== "half";
+                        const cellBg = !gross ? "transparent" : won ? "#1B7A3D" : half ? "#E08A1E" : lost ? "#C8392D" : "transparent";
+                        const cellColor = (won || half || lost) && gross ? C.white : C.black;
+                        const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
+                        return (
+                          <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg }}>
+                            <div style={{ fontWeight: 800, fontSize: 10, color: cellColor }}>{gross || ""}</div>
+                            {comp.format !== "stroke" && (
+                              <div style={{ fontWeight: 700, fontSize: 8.5, color: gross ? (won || half || lost ? "rgba(255,255,255,.7)" : C.steel) : C.ash }}>
+                                {gross ? (secondary ?? "0") : ""}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding: "4px", textAlign: "center" }}>
+                        <div style={{ fontWeight: 900, fontSize: 11 }}>{grossTotal || "—"}</div>
+                        {comp.format !== "stroke" && <div style={{ fontWeight: 700, fontSize: 9, color: C.steel }}>{ptsTotal || ""}</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        );
+
+        return (
+          <div className="sheet-overlay" onClick={() => setShowLeaderboard(false)}>
+            <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+
+              {/* Match result banner */}
+              {matchResult?.closedResult && (
+                <div style={{ margin: "0 16px 14px", padding: "12px 16px", background: C.black, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 4 }}>Result</div>
+                  <div style={{ fontWeight: 900, fontSize: 18, color: C.white }}>{matchResult.closedResult}</div>
+                </div>
+              )}
+
+              {matchResult && !matchResult.closedResult && (
+                <div style={{ margin: "0 16px 14px" }}>
+                  <div style={{ display: "flex", border: `1px solid ${C.line}` }}>
+                    {[matchResult.p1, matchResult.p2].map((p, i) => {
+                      const wins = i === 0 ? matchResult.p1w : matchResult.p2w;
+                      const isLeading = (i === 0 && matchResult.diff > 0) || (i === 1 && matchResult.diff < 0);
+                      return (
+                        <div key={p.id} style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: isLeading ? C.black : C.white, borderRight: `1px solid ${C.line}` }}>
+                          <div style={{ fontWeight: 800, fontSize: 10.5, color: isLeading ? C.white : C.steel, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                          <div style={{ fontWeight: 900, fontSize: 26, color: isLeading ? C.white : C.black, lineHeight: 1 }}>{wins}</div>
+                          <div style={{ fontSize: 8.5, color: isLeading ? "rgba(255,255,255,.45)" : C.ash, marginTop: 3 }}>holes won</div>
+                        </div>
+                      );
+                    })}
+                    <div style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: C.cloud }}>
+                      <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.ash, marginBottom: 4 }}>Halved</div>
+                      <div style={{ fontWeight: 900, fontSize: 26, color: C.black, lineHeight: 1 }}>{matchResult.halved}</div>
+                      <div style={{ fontSize: 8.5, color: C.ash, marginTop: 3 }}>holes</div>
+                    </div>
+                  </div>
+                  {/* Match status below the boxes */}
+                  <div style={{ textAlign: "center", padding: "8px 0 0", fontSize: 12, fontWeight: 800, color: C.black }}>
+                    {matchResult.diff === 0 ? "All Square" : `${matchResult.diff > 0 ? matchResult.p1.name : matchResult.p2.name} ${Math.abs(matchResult.diff)} UP`}
+                  </div>
+                </div>
+              )}
+
+              {/* Header */}
+              <div style={{ padding: "0 16px 10px" }}>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{comp.gameName || comp.courseName}</div>
+                <div style={{ fontSize: 11, color: C.steel }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · {holesPlayed} hole{holesPlayed !== 1 ? "s" : ""} played</div>
+              </div>
+
+              {/* Scorecard grid — front 9 */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
+                <HoleRow label="Player" holeSet={front} />
+              </div>
+
+              {/* Scorecard grid — back 9 */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
+                <HoleRow label="Player" holeSet={back} />
+              </div>
+
+              {/* Stroke/Stableford totals */}
+              {comp.format !== "matchplay" && (
+                <div style={{ margin: "0 16px 14px", background: C.cloud, padding: "10px 14px" }}>
+                  {comp.players.map((p, i) => {
+                    const strokes = holes.reduce((s,h) => s + (parseInt(scores[p.id]?.[h.n]?.strokes)||0), 0);
+                    const pts = holes.reduce((s,h) => s + (playerPts(p,h)||0), 0);
+                    return (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0", borderBottom: i < comp.players.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                        <span style={{ fontWeight: 700, fontSize: 12 }}>{p.name}</span>
+                        <span style={{ fontWeight: 800, fontSize: 13 }}>
+                          {comp.format === "stableford" ? `${pts} pts` : `${strokes || "—"} strokes`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div style={{ padding: "0 16px" }}>
+                <button className="btn btn-primary" onClick={() => setShowLeaderboard(false)}>Back to Scoring</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
