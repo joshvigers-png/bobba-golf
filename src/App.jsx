@@ -3174,6 +3174,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
   const [scores, setScores] = useState(round.scores);
   const [dirty, setDirty] = useState(false);
+  const [editedCourseName, setEditedCourseName] = useState(round.courseName || course?.name || "");
   if (!course) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
@@ -3227,7 +3228,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
 
   const saveChanges = () => {
     const diff = teeInfo ? scoreDifferential(totalGross, teeInfo.rating, teeInfo.slope) : null;
-    const updated = { ...round, scores, totalGross, totalPts, totalPutts, holesPlayed, differential: diff, editedAt: Date.now() };
+    const updated = { ...round, courseName: editedCourseName.trim() || round.courseName, scores, totalGross, totalPts, totalPutts, holesPlayed, differential: diff, editedAt: Date.now() };
     const rounds = LS.get(`bb_rounds_${user.id}`) || [];
     const next = rounds.map(r => r.id === round.id ? updated : r);
     LS.set(`bb_rounds_${user.id}`, next);
@@ -3356,8 +3357,18 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div className="page-head-eyebrow">Editing Round</div>
-        <h1 style={{ fontSize: 22 }}>{course.name}</h1>
-        <p>{new Date(round.date).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</p>
+        <div style={{ position: "relative", zIndex: 1, marginTop: 2, marginBottom: 2 }}>
+          <input
+            className="input"
+            value={editedCourseName}
+            onChange={e => { setEditedCourseName(e.target.value); setDirty(true); }}
+            style={{ fontWeight: 800, fontSize: 20, padding: "6px 10px", border: `1.5px solid ${C.line}`, background: C.white }}
+          />
+          <div style={{ fontSize: 10, color: C.ash, marginTop: 4 }}>
+            Editing the course name updates all Course Summary groupings — use a consistent name across rounds at the same venue.
+          </div>
+        </div>
+        <p style={{ marginTop: 4 }}>{new Date(round.date).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</p>
       </div>
       <div className="panel" style={{ marginTop: -1 }}>
         <RoundSummaryStrip round={{ ...round, totalGross, totalPts, coursePar: course.holes.reduce((s,h)=>s+h.par,0) }} user={user} />
@@ -6140,12 +6151,14 @@ function RoundDetailView({ user, round, onEdit, onBack }) {
             const pts = gross ? stablefordPts(gross, h.par, hcpPlayed || 0, s.si ?? h.si) : null;
             const isEven = i % 2 === 0;
             const ptColor = pts == null ? C.steel : pts >= 2 ? "#1B7A3D" : pts === 1 ? "#E08A1E" : "#C8392D";
+            const grossColor = !gross ? "transparent" : (gross - h.par) <= 0 ? "#1B7A3D" : (gross - h.par) === 1 ? "#E08A1E" : "#C8392D";
+            const grossTextColor = gross ? C.white : C.black;
             return (
               <tr key={h.n} style={{ background: isEven ? C.white : C.paper }}>
                 <td style={{ padding: "7px 8px", fontWeight: 800 }}>{h.n}</td>
                 <td style={{ padding: "7px 4px", color: C.steel }}>{h.par}</td>
                 <td style={{ padding: "7px 4px", color: C.ash }}>{s.si ?? h.si ?? "—"}</td>
-                <td style={{ padding: "7px 4px", fontWeight: 700 }}>{gross || "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800, background: grossColor, color: grossTextColor, textAlign: "center" }}>{gross || "—"}</td>
                 <td style={{ padding: "7px 4px", fontWeight: 800, color: ptColor }}>{pts ?? "—"}</td>
                 <td style={{ padding: "7px 4px", color: C.steel }}>{s.putts ?? "—"}</td>
                 <td style={{ padding: "7px 4px" }}>
@@ -6547,10 +6560,9 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
         const gross = parseInt(getScore(round, hole.n)?.strokes);
         if (!gross) return "transparent";
         const diff = gross - hole.par;
-        if (diff <= -1) return "#1B7A3D";
-        if (diff === 0) return "#2563EB";
-        if (diff === 1) return "#E08A1E";
-        return "#C8392D";
+        if (diff <= 0) return "#1B7A3D";   // par or better — green
+        if (diff === 1) return "#E08A1E";   // bogey — orange
+        return "#C8392D";                   // double or worse — red
       } else {
         const pts = getPts(round, hole);
         if (pts == null) return "transparent";
@@ -6654,10 +6666,9 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
         <div style={{ margin: "0 18px 14px", padding: "10px 14px", background: C.white, border: `1px solid ${C.line}`, borderRadius: 4 }}>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             {(view === "strokes" ? [
-              { color: "#1B7A3D", label: "Birdie or better" },
-              { color: "#2563EB", label: "Par" },
+              { color: "#1B7A3D", label: "Par or better" },
               { color: "#E08A1E", label: "Bogey" },
-              { color: "#C8392D", label: "Double+" },
+              { color: "#C8392D", label: "Double or worse" },
             ] : [
               { color: "#1B7A3D", label: "3+ pts (birdie+)" },
               { color: "#2563EB", label: "2 pts (par)" },
