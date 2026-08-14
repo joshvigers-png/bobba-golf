@@ -2906,8 +2906,8 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           </p>
         )}
         {!searching && !loadingCourse && courses.map(c => (
-          <div key={c.id} className="course-row" style={{ flexDirection: "column", alignItems: "stretch", cursor: "default" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "4px 0" }} onClick={() => selectCourse(c)}>
+          <div key={c.id} className="course-row" style={{ flexDirection: "column", alignItems: "stretch", cursor: "pointer" }} onClick={() => selectCourse(c)}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
               <div className="course-icon-wrap" style={{ background: "#2563EB" }}><Icon.Pin /></div>
               <div style={{ flex: 1 }}>
                 <div className="course-name">{c.name}</div>
@@ -2916,7 +2916,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
               <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
             </div>
             <button
-              onClick={() => { setPreScanCourse(c); setStep("scan"); }}
+              onClick={(e) => { e.stopPropagation(); setPreScanCourse(c); setStep("scan"); }}
               style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", borderTop: `1px solid ${C.line}`, padding: "10px 0 10px 44px", cursor: "pointer", marginTop: 8, width: "100%" }}
             >
               <div style={{ width: 12, height: 12, color: C.steel }}><Icon.ModRound /></div>
@@ -4450,8 +4450,8 @@ function CompCourseFlow({ onBack, onNext }) {
       <div className="section-head"><span className="section-title">{query.trim() ? "Results" : "All Courses"}</span></div>
       {(searching || loadingCourse) && <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: 18 }}>{loadingCourse ? "Loading…" : "Searching…"}</p>}
       {!searching && !loadingCourse && courses.map(c => (
-        <div key={c.id} className="course-row" style={{ flexDirection: "column", alignItems: "stretch", cursor: "default" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "4px 0" }} onClick={() => selectCourse(c)}>
+        <div key={c.id} className="course-row" style={{ flexDirection: "column", alignItems: "stretch", cursor: "pointer" }} onClick={() => selectCourse(c)}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
             <div className="course-icon-wrap" style={{ background: "#2563EB" }}><Icon.Pin /></div>
             <div style={{ flex: 1 }}>
               <div className="course-name">{c.name}</div>
