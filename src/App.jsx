@@ -4819,7 +4819,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
                         const cellColor = (won || half || lost) && gross ? C.white : C.black;
                         const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
                         return (
-                          <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg }}>
+                          <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg, outline: "1px solid rgba(0,0,0,0.12)" }}>
                             <div style={{ fontWeight: 800, fontSize: 10, color: cellColor }}>{gross || ""}</div>
                             {comp.format !== "stroke" && (
                               <div style={{ fontWeight: 700, fontSize: 8.5, color: gross ? (won || half || lost ? "rgba(255,255,255,.7)" : C.steel) : C.ash }}>
@@ -5028,7 +5028,7 @@ function CompDetailView({ comp, onBack, onResume }) {
                   const cellColor = (won || half || lost) && gross ? C.white : C.black;
                   const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
                   return (
-                    <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg }}>
+                    <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg, outline: "1px solid rgba(0,0,0,0.12)" }}>
                       <div style={{ fontWeight: 800, fontSize: 10, color: cellColor }}>{gross || ""}</div>
                       {comp.format !== "stroke" && <div style={{ fontWeight: 700, fontSize: 8.5, color: gross ? (won || half || lost ? "rgba(255,255,255,.7)" : C.steel) : C.ash }}>{gross ? (secondary ?? "0") : ""}</div>}
                     </td>
@@ -6158,7 +6158,7 @@ function RoundDetailView({ user, round, onEdit, onBack }) {
                 <td style={{ padding: "7px 8px", fontWeight: 800 }}>{h.n}</td>
                 <td style={{ padding: "7px 4px", color: C.steel }}>{h.par}</td>
                 <td style={{ padding: "7px 4px", color: C.ash }}>{s.si ?? h.si ?? "—"}</td>
-                <td style={{ padding: "7px 4px", fontWeight: 800, background: grossColor, color: grossTextColor, textAlign: "center" }}>{gross || "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800, background: grossColor, color: grossTextColor, textAlign: "center", outline: "1px solid rgba(0,0,0,0.15)" }}>{gross || "—"}</td>
                 <td style={{ padding: "7px 4px", fontWeight: 800, color: ptColor }}>{pts ?? "—"}</td>
                 <td style={{ padding: "7px 4px", color: C.steel }}>{s.putts ?? "—"}</td>
                 <td style={{ padding: "7px 4px" }}>
@@ -6607,7 +6607,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
                       const bg = cellColor(r, h);
                       const hasData = view === "strokes" ? !!gross : pts != null;
                       return (
-                        <td key={r.id} style={{ padding: "4px 2px", textAlign: "center", background: bg }}>
+                        <td key={r.id} style={{ padding: "4px 2px", textAlign: "center", background: bg, outline: "1px solid rgba(0,0,0,0.12)" }}>
                           <div style={{ fontWeight: 800, fontSize: 11, color: hasData ? C.white : C.ash }}>
                             {view === "strokes" ? (gross || "—") : (pts ?? "—")}
                           </div>
