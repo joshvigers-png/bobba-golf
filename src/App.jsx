@@ -6233,46 +6233,26 @@ function RoundSummaryStrip({ round, user }) {
 function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser }) {
   const [allRounds, setAllRounds] = useState(LS.get(`bb_rounds_${user.id}`) || []);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [summaryYear, setSummaryYear] = useState(null);
 
   const sorted = [...allRounds].sort((a,b) => new Date(b.date) - new Date(a.date));
-  const recent = sorted.slice(0, 3);
-  const older = sorted.slice(3);
-
-  const [year, setYear] = useState("all");
-  const [month, setMonth] = useState("all");
-
-  const years = [...new Set(older.map(r => new Date(r.date).getFullYear()))].sort((a,b)=>b-a);
-  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-  const filteredOlder = older.filter(r => {
-    const d = new Date(r.date);
-    if (year !== "all" && d.getFullYear() !== parseInt(year)) return false;
-    if (month !== "all" && d.getMonth() !== parseInt(month)) return false;
-    return true;
-  });
+  const years = [...new Set(sorted.map(r => new Date(r.date).getFullYear()))].sort((a,b)=>b-a);
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
     const next = allRounds.filter(r => r.id !== deleteTarget.id);
     LS.set(`bb_rounds_${user.id}`, next);
     setAllRounds(next);
-
-    // Removing a round changes the differential pool — recalculate the
-    // handicap index, but never overwrite a real handicap with a blank one
-    // just because there are currently zero rounds with a valid differential
-    // (e.g. deleting down to nothing, or down to rounds that never had
-    // course rating/slope data available). Keep the last known value instead.
     const diffs = next.filter(r => r.differential != null).map(r => r.differential);
     const newIndex = calcHandicapIndex(diffs);
     if (newIndex != null && shouldAutoUpdateHandicap(user, diffs)) {
       if (onUpdateUser) onUpdateUser({ ...user, handicap: newIndex });
     }
-
     setDeleteTarget(null);
   };
 
   const RoundCard = ({ r }) => {
-    const { value: hcpPlayed, estimated } = getHcpPlayed(r, user);
+    const { value: hcpPlayed } = getHcpPlayed(r, user);
     return (
       <div className="course-row" style={{ alignItems: "flex-start", flexDirection: "column", cursor: "default" }}>
         <div style={{ display: "flex", width: "100%", alignItems: "flex-start" }}>
@@ -6280,9 +6260,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
             <div className="course-name">{r.courseName}</div>
             <div className="course-loc">{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} · {r.holesPlayed} holes</div>
             {hcpPlayed != null && (
-              <div className="course-loc" style={{ marginTop: 1 }}>
-                HCP Played · {hcpPlayed.toFixed(1)}
-              </div>
+              <div className="course-loc" style={{ marginTop: 1 }}>HCP Played · {hcpPlayed.toFixed(1)}</div>
             )}
           </div>
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -6325,6 +6303,89 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
             </div>
           );
         })()}
+      </div>
+    );
+  };
+
+  // ── Year Summary Sheet ──
+  const YearSummary = ({ year, onClose }) => {
+    const rounds = sorted.filter(r => new Date(r.date).getFullYear() === year);
+    const totalRounds = rounds.length;
+    const avgPts = rounds.filter(r=>r.totalPts).length ? Math.round(rounds.filter(r=>r.totalPts).reduce((s,r)=>s+(r.totalPts||0),0) / rounds.filter(r=>r.totalPts).length) : null;
+    const avgStrokes = rounds.filter(r=>r.totalGross).length ? Math.round(rounds.filter(r=>r.totalGross).reduce((s,r)=>s+(r.totalGross||0),0) / rounds.filter(r=>r.totalGross).length) : null;
+    const bestRound = rounds.filter(r=>r.totalPts).length ? rounds.filter(r=>r.totalPts).reduce((a,b)=>b.totalPts>a.totalPts?b:a) : null;
+    const worstRound = rounds.filter(r=>r.totalPts).length ? rounds.filter(r=>r.totalPts).reduce((a,b)=>b.totalPts<a.totalPts?b:a) : null;
+    const totalLost = rounds.reduce((s,r)=>s+(r.totalLost||0),0);
+    return (
+      <div className="sheet-overlay" onClick={onClose}>
+        <div className="sheet" style={{ maxHeight: "90vh", overflowY: "auto", padding: "16px 0 32px" }} onClick={e=>e.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div style={{ padding: "0 20px 14px", borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ fontWeight: 900, fontSize: 22 }}>{year}</div>
+            <div style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>Year in Golf — {totalRounds} round{totalRounds!==1?"s":""}</div>
+          </div>
+
+          {/* Summary stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 20px" }}>
+            {[
+              { label: "Rounds Played", value: totalRounds },
+              { label: "Avg Points", value: avgPts ?? "—" },
+              { label: "Avg Strokes", value: avgStrokes ?? "—" },
+              { label: "Lost Balls", value: totalLost },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ background: C.cloud, padding: "12px 14px" }}>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{value}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {bestRound && worstRound && bestRound.id !== worstRound.id && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 20px 14px" }}>
+              {[{ label: "Best Round", r: bestRound, color: "#1B7A3D" }, { label: "Worst Round", r: worstRound, color: "#C8392D" }].map(({ label, r, color }) => (
+                <div key={label} style={{ background: C.cloud, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color, marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>{r.totalPts} pts</div>
+                  <div style={{ fontSize: 10.5, color: C.steel, marginTop: 2 }}>{r.courseName}</div>
+                  <div style={{ fontSize: 10, color: C.ash }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Round by round table */}
+          <div style={{ padding: "0 20px 14px" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 8 }}>All Rounds</div>
+            <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 40px 40px 50px 52px", background: C.black, padding: "7px 10px" }}>
+                {["Course","Pts","Grs","To Par","Played To"].map(h => (
+                  <div key={h} style={{ fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>{h}</div>
+                ))}
+              </div>
+              {rounds.map((r, i) => {
+                const toPar = r.coursePar && r.totalGross ? r.totalGross - r.coursePar : null;
+                return (
+                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 40px 40px 50px 52px", padding: "8px 10px", background: i%2===0?C.white:C.paper, borderTop: `1px solid ${C.line}` }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.courseName}</div>
+                      <div style={{ fontSize: 9, color: C.ash }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: 11, color: r.totalPts>=36?"#1B7A3D":r.totalPts>=30?"#E08A1E":"#C8392D" }}>{r.totalPts??"-"}</div>
+                    <div style={{ fontWeight: 700, fontSize: 11 }}>{r.totalGross||"-"}</div>
+                    <div style={{ fontWeight: 700, fontSize: 11, color: toPar==null?C.black:toPar>0?"#C8392D":toPar<0?"#1B7A3D":C.black }}>
+                      {toPar==null?"-":toPar>0?`+${toPar}`:toPar}
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 11 }}>{r.differential!=null?r.differential.toFixed(1):"-"}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ padding: "0 20px" }}>
+            <button className="btn btn-primary" onClick={onClose}>Close</button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -6377,39 +6438,27 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
         </div>
       </div>
 
-      <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">Most Recent</span></div>
-      <div style={{ marginBottom: 8 }}>
-        {recent.map(r => <RoundCard key={r.id} r={r} />)}
-      </div>
-
-      {older.length > 0 && (
-        <>
-          <div className="section-head" style={{ marginTop: 14 }}><span className="section-title">All Rounds</span></div>
-          <div className="filter-chip-row">
-            <div className={`filter-chip ${year==="all"?"on":""}`} onClick={() => { setYear("all"); setMonth("all"); }}>All Years</div>
-            {years.map(y => (
-              <div key={y} className={`filter-chip ${year===String(y)?"on":""}`} onClick={() => setYear(String(y))}>{y}</div>
-            ))}
-          </div>
-          {year !== "all" && (
-            <div className="filter-chip-row" style={{ marginTop: -6 }}>
-              <div className={`filter-chip ${month==="all"?"on":""}`} onClick={() => setMonth("all")}>All Months</div>
-              {monthNames.map((m,i) => (
-                <div key={m} className={`filter-chip ${month===String(i)?"on":""}`} onClick={() => setMonth(String(i))}>{m}</div>
-              ))}
+      {/* Flat list grouped by year */}
+      {years.map(y => {
+        const yearRounds = sorted.filter(r => new Date(r.date).getFullYear() === y);
+        return (
+          <div key={y}>
+            <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 18 }}>
+              <span className="section-title">{y} · {yearRounds.length} round{yearRounds.length!==1?"s":""}</span>
+              <button
+                onClick={() => setSummaryYear(y)}
+                style={{ fontSize: 11, fontWeight: 800, color: C.black, background: C.cloud, border: "none", padding: "4px 10px", borderRadius: 20, cursor: "pointer", letterSpacing: ".01em" }}
+              >
+                Year Summary
+              </button>
             </div>
-          )}
-          <div style={{ marginTop: 8 }}>
-            {filteredOlder.length === 0 ? (
-              <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "24px 18px" }}>No rounds in this period.</p>
-            ) : (
-              filteredOlder.map(r => <RoundCard key={r.id} r={r} />)
-            )}
+            {yearRounds.map(r => <RoundCard key={r.id} r={r} />)}
           </div>
-        </>
-      )}
+        );
+      })}
 
-      
+      {/* Year summary sheet */}
+      {summaryYear && <YearSummary year={summaryYear} onClose={() => setSummaryYear(null)} />}
 
       {deleteTarget && (
         <div className="sheet-overlay" onClick={() => setDeleteTarget(null)}>
