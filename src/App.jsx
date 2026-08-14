@@ -1923,6 +1923,81 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
 }
 
 // ─── Profile Screen (baseline) ────────────────────────────────────────────────
+// ─── WHS Info Sheet ───────────────────────────────────────────────────────────
+// Shared between Profile (Recalculate Handicap) and Performance (Handicap
+// Consistency chart) — explains how the WHS handicap index is calculated
+// so users understand why their index moves the way it does.
+function WHSInfoSheet({ onClose }) {
+  const table = [
+    { rounds: "3",    best: "1" },
+    { rounds: "4–5",  best: "1" },
+    { rounds: "6–8",  best: "2" },
+    { rounds: "9–12", best: "3" },
+    { rounds: "13–14",best: "4" },
+    { rounds: "15",   best: "5" },
+    { rounds: "16",   best: "6" },
+    { rounds: "17–18",best: "6–7" },
+    { rounds: "19–20",best: "8" },
+  ];
+  return (
+    <div className="sheet-overlay" onClick={onClose}>
+      <div className="sheet" style={{ maxHeight: "88vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 6 }}>How WHS Works</div>
+        <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 18 }}>
+          Your handicap index is calculated using the World Handicap System — the same method used by golf clubs worldwide.
+        </p>
+
+        {[
+          {
+            title: "1. Score Differential",
+            body: "Each round produces a Score Differential — a number that measures how well you played relative to the difficulty of the course. It uses the Course Rating and Slope Rating printed on your scorecard:\n\nDifferential = (113 ÷ Slope) × (Gross Score − Course Rating)\n\nA lower differential means a better round relative to that course's difficulty."
+          },
+          {
+            title: "2. Best Scores Count",
+            body: "Your index is based on your best differentials, not your average. As you build up more rounds, more of your scores are included — but always the best ones."
+          },
+          {
+            title: "3. The 0.96 Multiplier",
+            body: "WHS applies a 0.96 multiplier to the average of your best differentials. This rewards consistent low scoring and means your index is set slightly below your recent best — encouraging you to keep improving."
+          },
+          {
+            title: "4. Why can my index drop after a bad round?",
+            body: "It can't — a bad round simply won't be one of your best differentials, so it won't factor in. Your index can drop if a new good round enters your best-N pool, or if Recalculate corrects an earlier error."
+          },
+        ].map(({ title, body }) => (
+          <div key={title} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 5 }}>{title}</div>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.65, margin: 0, whiteSpace: "pre-line" }}>{body}</p>
+          </div>
+        ))}
+
+        {/* Best-N table */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>Rounds logged → Best scores used</div>
+          <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+            <div style={{ display: "flex", background: C.black, padding: "7px 14px" }}>
+              <div style={{ flex: 1, fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "rgba(255,255,255,.6)" }}>Rounds logged</div>
+              <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "rgba(255,255,255,.6)" }}>Best scores used</div>
+            </div>
+            {table.map((row, i) => (
+              <div key={row.rounds} style={{ display: "flex", padding: "8px 14px", background: i%2===0?C.white:C.paper, borderTop: `1px solid ${C.line}` }}>
+                <div style={{ flex: 1, fontWeight: 700, fontSize: 12 }}>{row.rounds}</div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: C.black }}>{row.best}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: C.ash, marginTop: 8, lineHeight: 1.5 }}>
+            At 8 rounds (where you are now), WHS uses your best 2 differentials × 0.96.
+          </p>
+        </div>
+
+        <button className="btn btn-primary" onClick={onClose}>Got it</button>
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -1936,6 +2011,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [recalcDone, setRecalcDone] = useState(false);
   const [recalcResult, setRecalcResult] = useState("");
+  const [whsInfoOpen, setWhsInfoOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
@@ -2133,7 +2209,10 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
       <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 13.5 }}>Recalculate Handicap</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>Recalculate Handicap</div>
+              <button onClick={() => setWhsInfoOpen(true)} style={{ width: 20, height: 20, borderRadius: "50%", background: C.cloud, border: "none", fontWeight: 800, fontSize: 11, color: C.steel, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>i</button>
+            </div>
             <div style={{ fontSize: 11.5, color: C.steel, marginTop: 3, lineHeight: 1.5 }}>
               Replays all your submitted scorecards through the latest WHS formula and updates your index. Use this if your handicap looks wrong.
             </div>
@@ -2246,6 +2325,8 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
           </div>
         </div>
       )}
+
+      {whsInfoOpen && <WHSInfoSheet onClose={() => setWhsInfoOpen(false)} />}
 
       {/* Notifications Sheet */}
       {notificationsOpen && (
@@ -5047,6 +5128,7 @@ function PerformanceScreen({ user, onBack }) {
   // fact, so array order alone doesn't reliably mean chronological order.
   const rounds = [...rawRounds].sort((a, b) => new Date(a.date) - new Date(b.date));
   const [range, setRange] = useState("all"); // all | last10 | last5 | last3
+  const [whsInfoOpen, setWhsInfoOpen] = useState(false);
 
   const filtered = range === "all" ? rounds
     : range === "last10" ? rounds.slice(-10)
@@ -5457,7 +5539,11 @@ function PerformanceScreen({ user, onBack }) {
       )}
 
       {/* Handicap trend */}
-      <div className="section-head"><span className="section-title">Handicap Consistency</span></div>
+      <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 18 }}>
+        <span className="section-title">Handicap Consistency</span>
+        <button onClick={() => setWhsInfoOpen(true)} style={{ width: 22, height: 22, borderRadius: "50%", background: C.cloud, border: "none", fontWeight: 800, fontSize: 12, color: C.steel, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>i</button>
+      </div>
+      {whsInfoOpen && <WHSInfoSheet onClose={() => setWhsInfoOpen(false)} />}
       {filteredHistory.length >= 2 ? (
         <HandicapChart points={filteredHistory} />
       ) : (
