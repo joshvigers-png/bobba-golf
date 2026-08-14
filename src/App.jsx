@@ -244,9 +244,10 @@ function calcHandicapIndex(diffs) {
   const n = diffs.length;
   if (n === 0) return null;
   const recent = diffs.slice(-20);
+  // Official WHS table: [number of rounds, number of best differentials to use]
   const table = [
-    [1,1],[2,1],[3,1],[4,2],[5,2],[6,2],[7,3],[8,3],[9,4],[10,4],
-    [11,5],[12,5],[13,6],[14,6],[15,7],[16,7],[17,8],[18,8],[19,9],[20,8],
+    [3,1],[4,1],[5,1],[6,2],[7,2],[8,2],[9,3],[10,3],
+    [11,3],[12,3],[13,4],[14,4],[15,5],[16,6],[17,6],[18,7],[19,8],[20,8],
   ];
   const count = recent.length;
   const useCount = (table.find(([c]) => c === count) || table[table.length - 1])[1];
