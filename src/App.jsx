@@ -1934,6 +1934,8 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [recalcDone, setRecalcDone] = useState(false);
+  const [recalcResult, setRecalcResult] = useState("");
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
@@ -2125,6 +2127,72 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
           </div>
         </div>
         <div style={{ width: 16, height: 16, color: C.ash }}><Icon.ChevronRight /></div>
+      </div>
+
+      <div className="section-head"><span className="section-title">Handicap</span></div>
+      <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>Recalculate Handicap</div>
+            <div style={{ fontSize: 11.5, color: C.steel, marginTop: 3, lineHeight: 1.5 }}>
+              Replays all your submitted scorecards through the latest WHS formula and updates your index. Use this if your handicap looks wrong.
+            </div>
+          </div>
+        </div>
+        {recalcDone && (
+          <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 16, height: 16, color: "#1B7A3D", flexShrink: 0 }}><Icon.Check /></div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1B7A3D" }}>
+              Handicap recalculated — new index: {recalcResult}
+            </div>
+          </div>
+        )}
+        <button
+          className="btn btn-outline"
+          onClick={() => {
+            const rounds = LS.get(`bb_rounds_${user.id}`) || [];
+            const sorted = [...rounds].sort((a,b) => new Date(a.date) - new Date(b.date));
+            const diffs = sorted.filter(r => r.differential != null).map(r => r.differential);
+            if (!diffs.length) { setRecalcDone(true); setRecalcResult("unchanged — no rounds with course rating/slope data"); return; }
+            const newIndex = calcHandicapIndex(diffs);
+            if (newIndex == null) { setRecalcDone(true); setRecalcResult("unchanged — not enough data"); return; }
+
+            // Rebuild handicap history and fix handicapPlayed on each round
+            // by replaying rounds in chronological order through the corrected formula.
+            const newHistory = [];
+            const updatedRounds = sorted.map(r => {
+              // handicapPlayed = the index BEFORE this round was submitted
+              const priorDiffs = sorted
+                .filter(r2 => new Date(r2.date) < new Date(r.date) && r2.differential != null)
+                .map(r2 => r2.differential);
+              const handicapPlayed = priorDiffs.length ? calcHandicapIndex(priorDiffs) : r.handicapPlayed;
+
+              // handicapHistory entry = the index AFTER this round
+              if (r.differential != null) {
+                const roundDiffs = sorted
+                  .filter(r2 => new Date(r2.date) <= new Date(r.date) && r2.differential != null)
+                  .map(r2 => r2.differential);
+                const idx = calcHandicapIndex(roundDiffs);
+                if (idx != null) newHistory.push({ roundId: r.id, date: r.date, value: idx });
+              }
+
+              return { ...r, handicapPlayed: handicapPlayed ?? r.handicapPlayed };
+            });
+
+            // Persist corrected rounds
+            LS.set(`bb_rounds_${user.id}`, updatedRounds);
+
+            // Update user with new index and history
+            const updated = { ...user, handicap: newIndex, handicapHistory: newHistory };
+            onUpdate(updated);
+            const acc = LS.get("bb_accounts") || [];
+            LS.set("bb_accounts", acc.map(a => a.id === user.id ? updated : a));
+            setRecalcDone(true);
+            setRecalcResult(newIndex.toFixed(1));
+          }}
+        >
+          Recalculate Now
+        </button>
       </div>
 
       <div className="section-head"><span className="section-title">Account</span></div>
