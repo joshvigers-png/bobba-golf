@@ -6307,7 +6307,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
     );
   };
 
-  // ── Year Summary Sheet ──
+  // ── Year Summary — full page view ──
   const YearSummary = ({ year, onClose }) => {
     const rounds = sorted.filter(r => new Date(r.date).getFullYear() === year);
     const totalRounds = rounds.length;
@@ -6317,73 +6317,75 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
     const worstRound = rounds.filter(r=>r.totalPts).length ? rounds.filter(r=>r.totalPts).reduce((a,b)=>b.totalPts<a.totalPts?b:a) : null;
     const totalLost = rounds.reduce((s,r)=>s+(r.totalLost||0),0);
     return (
-      <div className="sheet-overlay" onClick={onClose}>
-        <div className="sheet" style={{ maxHeight: "90vh", overflowY: "auto", padding: "16px 0 32px" }} onClick={e=>e.stopPropagation()}>
-          <div className="sheet-handle" />
-          <div style={{ padding: "0 20px 14px", borderBottom: `1px solid ${C.line}` }}>
-            <div style={{ fontWeight: 900, fontSize: 22 }}>{year}</div>
-            <div style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>Year in Golf — {totalRounds} round{totalRounds!==1?"s":""}</div>
+      <div style={{ position: "fixed", inset: 0, background: C.paper, zIndex: 100, overflowY: "auto" }}>
+        <div className="page-head">
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div className="page-head-eyebrow">Year in Golf</div>
+            <h1>{year}</h1>
+            <p>{totalRounds} round{totalRounds!==1?"s":""} logged</p>
           </div>
+        </div>
 
-          {/* Summary stats */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 20px" }}>
-            {[
-              { label: "Rounds Played", value: totalRounds },
-              { label: "Avg Points", value: avgPts ?? "—" },
-              { label: "Avg Strokes", value: avgStrokes ?? "—" },
-              { label: "Lost Balls", value: totalLost },
-            ].map(({ label, value }) => (
-              <div key={label} style={{ background: C.cloud, padding: "12px 14px" }}>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>{value}</div>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginTop: 2 }}>{label}</div>
+        {/* Summary stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 18px 14px" }}>
+          {[
+            { label: "Rounds Played", value: totalRounds },
+            { label: "Avg Points", value: avgPts ?? "—" },
+            { label: "Avg Strokes", value: avgStrokes ?? "—" },
+            { label: "Lost Balls", value: totalLost },
+          ].map(({ label, value }) => (
+            <div key={label} style={{ background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
+              <div style={{ fontWeight: 900, fontSize: 24 }}>{value}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel, marginTop: 3 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {bestRound && worstRound && bestRound.id !== worstRound.id && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 18px 18px" }}>
+            {[{ label: "Best Round", r: bestRound, color: "#1B7A3D" }, { label: "Worst Round", r: worstRound, color: "#C8392D" }].map(({ label, r, color }) => (
+              <div key={label} style={{ background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
+                <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color, marginBottom: 6 }}>{label}</div>
+                <div style={{ fontWeight: 900, fontSize: 22 }}>{r.totalPts} <span style={{ fontSize: 11, fontWeight: 600, color: C.steel }}>pts</span></div>
+                <div style={{ fontSize: 10.5, color: C.steel, marginTop: 4, lineHeight: 1.4 }}>{r.courseName}</div>
+                <div style={{ fontSize: 10, color: C.ash, marginTop: 2 }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
               </div>
             ))}
           </div>
+        )}
 
-          {bestRound && worstRound && bestRound.id !== worstRound.id && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 20px 14px" }}>
-              {[{ label: "Best Round", r: bestRound, color: "#1B7A3D" }, { label: "Worst Round", r: worstRound, color: "#C8392D" }].map(({ label, r, color }) => (
-                <div key={label} style={{ background: C.cloud, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color, marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontWeight: 900, fontSize: 18 }}>{r.totalPts} pts</div>
-                  <div style={{ fontSize: 10.5, color: C.steel, marginTop: 2 }}>{r.courseName}</div>
-                  <div style={{ fontSize: 10, color: C.ash }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
-                </div>
-              ))}
+        {/* Round by round table */}
+        <div style={{ padding: "0 18px 32px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>All Rounds</div>
+          <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+            {/* Header */}
+            <div style={{ display: "flex", background: C.black, padding: "8px 12px" }}>
+              <div style={{ flex: 1, fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>Course</div>
+              <div style={{ width: 32, textAlign: "right", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>Pts</div>
+              <div style={{ width: 36, textAlign: "right", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>Grs</div>
+              <div style={{ width: 44, textAlign: "right", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>To Par</div>
+              <div style={{ width: 44, textAlign: "right", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>Plyrd To</div>
             </div>
-          )}
-
-          {/* Round by round table */}
-          <div style={{ padding: "0 20px 14px" }}>
-            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 8 }}>All Rounds</div>
-            <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 40px 40px 50px 52px", background: C.black, padding: "7px 10px" }}>
-                {["Course","Pts","Grs","To Par","Played To"].map(h => (
-                  <div key={h} style={{ fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "rgba(255,255,255,.6)" }}>{h}</div>
-                ))}
-              </div>
-              {rounds.map((r, i) => {
-                const toPar = r.coursePar && r.totalGross ? r.totalGross - r.coursePar : null;
-                return (
-                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 40px 40px 50px 52px", padding: "8px 10px", background: i%2===0?C.white:C.paper, borderTop: `1px solid ${C.line}` }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.courseName}</div>
-                      <div style={{ fontSize: 9, color: C.ash }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
-                    </div>
-                    <div style={{ fontWeight: 800, fontSize: 11, color: r.totalPts>=36?"#1B7A3D":r.totalPts>=30?"#E08A1E":"#C8392D" }}>{r.totalPts??"-"}</div>
-                    <div style={{ fontWeight: 700, fontSize: 11 }}>{r.totalGross||"-"}</div>
-                    <div style={{ fontWeight: 700, fontSize: 11, color: toPar==null?C.black:toPar>0?"#C8392D":toPar<0?"#1B7A3D":C.black }}>
-                      {toPar==null?"-":toPar>0?`+${toPar}`:toPar}
-                    </div>
-                    <div style={{ fontWeight: 700, fontSize: 11 }}>{r.differential!=null?r.differential.toFixed(1):"-"}</div>
+            {rounds.map((r, i) => {
+              const toPar = r.coursePar && r.totalGross ? r.totalGross - r.coursePar : null;
+              return (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", padding: "10px 12px", background: i%2===0?C.white:C.paper, borderTop: `1px solid ${C.line}` }}>
+                  <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.courseName}</div>
+                    <div style={{ fontSize: 9.5, color: C.ash, marginTop: 1 }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{ padding: "0 20px" }}>
-            <button className="btn btn-primary" onClick={onClose}>Close</button>
+                  <div style={{ width: 32, textAlign: "right", fontWeight: 800, fontSize: 12, color: r.totalPts>=36?"#1B7A3D":r.totalPts>=30?"#E08A1E":"#C8392D" }}>{r.totalPts??"-"}</div>
+                  <div style={{ width: 36, textAlign: "right", fontWeight: 700, fontSize: 12 }}>{r.totalGross||"-"}</div>
+                  <div style={{ width: 44, textAlign: "right", fontWeight: 700, fontSize: 12, color: toPar==null?C.black:toPar>0?"#C8392D":toPar<0?"#1B7A3D":C.black }}>
+                    {toPar==null?"-":toPar>0?`+${toPar}`:toPar}
+                  </div>
+                  <div style={{ width: 44, textAlign: "right", fontWeight: 700, fontSize: 12 }}>{r.differential!=null?r.differential.toFixed(1):"-"}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -6447,7 +6449,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
               <span className="section-title">{y} · {yearRounds.length} round{yearRounds.length!==1?"s":""}</span>
               <button
                 onClick={() => setSummaryYear(y)}
-                style={{ fontSize: 11, fontWeight: 800, color: C.black, background: C.cloud, border: "none", padding: "4px 10px", borderRadius: 20, cursor: "pointer", letterSpacing: ".01em" }}
+                style={{ fontSize: 11, fontWeight: 800, color: C.white, background: C.black, border: "none", padding: "5px 12px", borderRadius: 20, cursor: "pointer", letterSpacing: ".01em", flexShrink: 0 }}
               >
                 Year Summary
               </button>
