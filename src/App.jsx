@@ -6320,6 +6320,8 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
   const [allRounds, setAllRounds] = useState(LS.get(`bb_rounds_${user.id}`) || []);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [summaryYear, setSummaryYear] = useState(null);
+  const [courseSummaryYear, setCourseSummaryYear] = useState(null); // year for course list
+  const [selectedCourse, setSelectedCourse] = useState(null); // { name, rounds[] }
 
   const sorted = [...allRounds].sort((a,b) => new Date(b.date) - new Date(a.date));
   const years = [...new Set(sorted.map(r => new Date(r.date).getFullYear()))].sort((a,b)=>b-a);
@@ -6478,6 +6480,232 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
     );
   };
 
+  // ── Course List View — courses played in a year ──
+  const CourseListView = ({ year, onClose, onSelectCourse }) => {
+    const yearRounds = sorted.filter(r => new Date(r.date).getFullYear() === year);
+    const courseMap = {};
+    yearRounds.forEach(r => {
+      const key = r.courseName;
+      if (!courseMap[key]) courseMap[key] = { name: r.courseName, rounds: [] };
+      courseMap[key].rounds.push(r);
+    });
+    const courses = Object.values(courseMap).sort((a,b) => b.rounds.length - a.rounds.length);
+    return (
+      <div style={{ position: "fixed", inset: 0, background: C.paper, zIndex: 100, overflowY: "auto" }}>
+        <div className="page-head">
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div className="page-head-eyebrow">{year} · Course Summary</div>
+            <h1>Courses Played</h1>
+            <p>{courses.length} course{courses.length!==1?"s":""} · {yearRounds.length} rounds</p>
+          </div>
+        </div>
+        {courses.map(c => (
+          <div key={c.name} className="course-row" style={{ cursor: "pointer" }} onClick={() => onSelectCourse(c)}>
+            <div style={{ flex: 1 }}>
+              <div className="course-name">{c.name}</div>
+              <div className="course-loc">{c.rounds.length} round{c.rounds.length!==1?"s":""} · {c.rounds.map(r => new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})).join(", ")}</div>
+            </div>
+            <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ── Course Scorecard View — hole by hole, game by game ──
+  const CourseScorecard = ({ courseData, onClose }) => {
+    const [view, setView] = useState("strokes"); // strokes | points
+    const { name, rounds: courseRounds } = courseData;
+    // Sort rounds oldest first so columns read left to right chronologically
+    const roundsSorted = [...courseRounds].sort((a,b) => new Date(a.date) - new Date(b.date));
+    // Get holes from the first round that has course data
+    const courseObj = (() => {
+      for (const r of roundsSorted) {
+        const c = r.course || COURSE_DB.find(c => c.id === r.courseId);
+        if (c?.holes?.length) return c;
+      }
+      return null;
+    })();
+    const holes = courseObj?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1}));
+    const front = holes.slice(0, 9);
+    const back = holes.slice(9, 18);
+
+    const getScore = (round, holeN) => round.scores?.[holeN];
+    const getPts = (round, hole) => {
+      const s = getScore(round, hole.n);
+      const gross = parseInt(s?.strokes);
+      if (!gross) return null;
+      const { value: hcp } = getHcpPlayed(round, user);
+      return stablefordPts(gross, hole.par, hcp || 0, s?.si ?? hole.si);
+    };
+
+    const cellColor = (round, hole) => {
+      if (view === "strokes") {
+        const gross = parseInt(getScore(round, hole.n)?.strokes);
+        if (!gross) return "transparent";
+        const diff = gross - hole.par;
+        if (diff <= -1) return "#1B7A3D";
+        if (diff === 0) return "#2563EB";
+        if (diff === 1) return "#E08A1E";
+        return "#C8392D";
+      } else {
+        const pts = getPts(round, hole);
+        if (pts == null) return "transparent";
+        if (pts >= 3) return "#1B7A3D";
+        if (pts === 2) return "#2563EB";
+        if (pts === 1) return "#E08A1E";
+        return "#C8392D";
+      }
+    };
+
+    const HoleSection = ({ holeSet, label }) => {
+      const colWidth = Math.max(36, Math.floor((320 - 60 - 24) / roundsSorted.length));
+      return (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, padding: "4px 18px 6px" }}>{label}</div>
+          <div style={{ overflowX: "auto", paddingBottom: 2 }}>
+            <table style={{ borderCollapse: "collapse", tableLayout: "fixed", minWidth: "100%" }}>
+              <thead>
+                {/* Round date header */}
+                <tr style={{ background: C.black }}>
+                  <td style={{ width: 60, padding: "5px 8px", fontSize: 8.5, fontWeight: 800, color: "rgba(255,255,255,.6)", textTransform: "uppercase" }}>Hole</td>
+                  <td style={{ width: 24, padding: "5px 4px", fontSize: 8.5, fontWeight: 800, color: "rgba(255,255,255,.6)", textAlign: "center" }}>Par</td>
+                  {roundsSorted.map(r => (
+                    <td key={r.id} style={{ width: colWidth, padding: "5px 3px", fontSize: 9, fontWeight: 800, color: C.white, textAlign: "center" }}>
+                      {new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
+                    </td>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {holeSet.map((h, i) => (
+                  <tr key={h.n} style={{ background: i%2===0?C.white:C.paper }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 700, fontSize: 11 }}>
+                      <div>{h.n}</div>
+                      <div style={{ fontSize: 8.5, color: C.ash }}>SI {h.si}</div>
+                    </td>
+                    <td style={{ padding: "6px 4px", fontSize: 10.5, color: C.steel, textAlign: "center", fontWeight: 700 }}>{h.par}</td>
+                    {roundsSorted.map(r => {
+                      const s = getScore(r, h.n);
+                      const gross = parseInt(s?.strokes);
+                      const pts = getPts(r, h);
+                      const bg = cellColor(r, h);
+                      const hasData = view === "strokes" ? !!gross : pts != null;
+                      return (
+                        <td key={r.id} style={{ padding: "4px 2px", textAlign: "center", background: bg }}>
+                          <div style={{ fontWeight: 800, fontSize: 11, color: hasData ? C.white : C.ash }}>
+                            {view === "strokes" ? (gross || "—") : (pts ?? "—")}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                {/* Nine total row */}
+                <tr style={{ background: C.cloud, borderTop: `2px solid ${C.line}` }}>
+                  <td colSpan={2} style={{ padding: "6px 8px", fontWeight: 800, fontSize: 10, textTransform: "uppercase", letterSpacing: ".04em", color: C.steel }}>
+                    {holeSet[0].n <= 9 ? "Out" : "In"}
+                  </td>
+                  {roundsSorted.map(r => {
+                    const total = view === "strokes"
+                      ? holeSet.reduce((s,h) => s+(parseInt(getScore(r,h.n)?.strokes)||0),0)
+                      : holeSet.reduce((s,h) => s+(getPts(r,h)||0),0);
+                    return (
+                      <td key={r.id} style={{ padding: "6px 2px", textAlign: "center", fontWeight: 900, fontSize: 12 }}>
+                        {total || "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div style={{ position: "fixed", inset: 0, background: C.paper, zIndex: 110, overflowY: "auto" }}>
+        <div className="page-head">
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div className="page-head-eyebrow">Course Summary</div>
+              <h1 style={{ fontSize: 20 }}>{name}</h1>
+              <p>{roundsSorted.length} round{roundsSorted.length!==1?"s":""} logged here</p>
+            </div>
+            {/* Strokes / Points toggle */}
+            <div style={{ display: "flex", border: `1.5px solid ${C.line}`, overflow: "hidden", borderRadius: 4, flexShrink: 0, marginTop: 4 }}>
+              {["strokes","points"].map(v => (
+                <button key={v} onClick={() => setView(v)} style={{ padding: "6px 10px", fontWeight: 800, fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em", background: view===v?C.black:C.white, color: view===v?C.white:C.steel, border: "none", cursor: "pointer" }}>
+                  {v === "strokes" ? "Stk" : "Pts"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Colour key */}
+        <div style={{ margin: "0 18px 14px", padding: "10px 14px", background: C.white, border: `1px solid ${C.line}`, borderRadius: 4 }}>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            {(view === "strokes" ? [
+              { color: "#1B7A3D", label: "Birdie or better" },
+              { color: "#2563EB", label: "Par" },
+              { color: "#E08A1E", label: "Bogey" },
+              { color: "#C8392D", label: "Double+" },
+            ] : [
+              { color: "#1B7A3D", label: "3+ pts (birdie+)" },
+              { color: "#2563EB", label: "2 pts (par)" },
+              { color: "#E08A1E", label: "1 pt (bogey)" },
+              { color: "#C8392D", label: "0 pts" },
+            ]).map(({ color, label }) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <HoleSection holeSet={front} label="Front Nine" />
+        <HoleSection holeSet={back} label="Back Nine" />
+
+        {/* Round totals summary */}
+        <div style={{ margin: "0 18px 32px" }}>
+          <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 8 }}>Round Totals</div>
+          <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+            {roundsSorted.map((r, i) => {
+              const gross = holes.reduce((s,h) => s+(parseInt(getScore(r,h.n)?.strokes)||0),0);
+              const pts = holes.reduce((s,h) => s+(getPts(r,h)||0),0);
+              const { value: hcp } = getHcpPlayed(r, user);
+              return (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", padding: "10px 14px", background: i%2===0?C.white:C.paper, borderTop: i>0?`1px solid ${C.line}`:"none" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12 }}>{new Date(r.date).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</div>
+                    {hcp && <div style={{ fontSize: 10.5, color: C.steel }}>HCP {hcp.toFixed(1)}</div>}
+                  </div>
+                  <div style={{ textAlign: "right", marginRight: 16 }}>
+                    <div style={{ fontWeight: 900, fontSize: 16 }}>{gross || "—"}</div>
+                    <div style={{ fontSize: 9, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em" }}>strokes</div>
+                  </div>
+                  <div style={{ textAlign: "right", minWidth: 40 }}>
+                    <div style={{ fontWeight: 900, fontSize: 16, color: pts>=36?"#1B7A3D":pts>=30?"#E08A1E":"#C8392D" }}>{pts}</div>
+                    <div style={{ fontSize: 9, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em" }}>pts</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (allRounds.length === 0) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
@@ -6533,12 +6761,20 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
           <div key={y}>
             <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 18 }}>
               <span className="section-title">{y} · {yearRounds.length} round{yearRounds.length!==1?"s":""}</span>
-              <button
-                onClick={() => setSummaryYear(y)}
-                style={{ fontSize: 11, fontWeight: 800, color: C.white, background: C.black, border: "none", padding: "5px 12px", borderRadius: 20, cursor: "pointer", letterSpacing: ".01em", flexShrink: 0 }}
-              >
-                Year Summary
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => setCourseSummaryYear(y)}
+                  style={{ fontSize: 11, fontWeight: 800, color: C.white, background: "#2563EB", border: "none", padding: "5px 10px", borderRadius: 20, cursor: "pointer" }}
+                >
+                  Course Summary
+                </button>
+                <button
+                  onClick={() => setSummaryYear(y)}
+                  style={{ fontSize: 11, fontWeight: 800, color: C.white, background: C.black, border: "none", padding: "5px 10px", borderRadius: 20, cursor: "pointer" }}
+                >
+                  Year Summary
+                </button>
+              </div>
             </div>
             {yearRounds.map(r => <RoundCard key={r.id} r={r} />)}
           </div>
@@ -6547,6 +6783,19 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
 
       {/* Year summary sheet */}
       {summaryYear && <YearSummary year={summaryYear} onClose={() => setSummaryYear(null)} />}
+      {courseSummaryYear && !selectedCourse && (
+        <CourseListView
+          year={courseSummaryYear}
+          onClose={() => setCourseSummaryYear(null)}
+          onSelectCourse={(c) => setSelectedCourse(c)}
+        />
+      )}
+      {selectedCourse && (
+        <CourseScorecard
+          courseData={selectedCourse}
+          onClose={() => { setSelectedCourse(null); setCourseSummaryYear(null); }}
+        />
+      )}
 
       {deleteTarget && (
         <div className="sheet-overlay" onClick={() => setDeleteTarget(null)}>
