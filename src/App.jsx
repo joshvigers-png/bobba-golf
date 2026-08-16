@@ -2706,7 +2706,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   };
 
   const selectCourse = async (c) => {
-    if (!c.fromApi) { setCourse(c); setStep("setup"); return; } // local demo course, already complete
+    if (!c.fromApi) { setCourse(c); setStep("course"); return; } // local demo course
     setLoadingCourse(true);
     try {
       const res = await fetch(`${COURSE_API_PROXY}/course/${c.id}`);
@@ -2728,13 +2728,10 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       if (!raw) throw new Error("No course data returned");
       const normalized = normalizeApiCourse(raw);
       setCourse(normalized);
-      // Default to yellow tees (the most commonly played worldwide) when
-      // available; otherwise fall back to whichever tee the course actually
-      // has, or leave unset entirely if this course has no tee data at all.
       const teeKeys = Object.keys(normalized.tees);
       const defaultTee = teeKeys.includes("yellow") ? "yellow" : (teeKeys[0] || null);
       setSetup(s => ({ ...s, tee: defaultTee }));
-      setStep("setup");
+      setStep("course"); // go to course detail/confirm page, not straight to setup
     } catch (e) {
       if (e.message === "RATE_LIMIT") {
         setSearchError("Course search has hit today's request limit — try again within 24 hours, or scan your scorecard below.");
@@ -2941,6 +2938,94 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     );
   }
 
+  // ── Step: Course detail — confirm course, option to scan or continue ──
+  if (step === "course" && course) {
+    const teeKeys = Object.keys(course.tees || {});
+    const hasHoles = course.holes?.length > 0;
+    const hasSI = course.holes?.some(h => h.si);
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <div className="page-head">
+          <button onClick={() => setStep("search")} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div className="page-head-eyebrow">Play a Round</div>
+            <h1 style={{ fontSize: 22 }}>{course.name}</h1>
+            {course.location && <p style={{ marginTop: 2 }}>{course.location}</p>}
+          </div>
+        </div>
+
+        {/* Course data summary */}
+        <div style={{ margin: "0 18px 18px", background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>Course Data</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: C.steel }}>Holes</span>
+              <span style={{ fontWeight: 700, fontSize: 12.5 }}>{hasHoles ? course.holes.length : "—"}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: C.steel }}>Stroke Index</span>
+              <span style={{ fontWeight: 700, fontSize: 12.5, color: hasSI ? "#1B7A3D" : "#C8392D" }}>{hasSI ? "Available" : "Not available"}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: C.steel }}>Tees</span>
+              <span style={{ fontWeight: 700, fontSize: 12.5 }}>{teeKeys.length > 0 ? teeKeys.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(", ") : "—"}</span>
+            </div>
+            {teeKeys.map(t => {
+              const tee = course.tees[t];
+              if (!tee?.rating && !tee?.slope) return null;
+              return (
+                <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 12.5, color: C.steel }}>{t.charAt(0).toUpperCase() + t.slice(1)} — Rating / Slope</span>
+                  <span style={{ fontWeight: 700, fontSize: 12.5 }}>{tee.rating ?? "—"} / {tee.slope ?? "—"}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Scan to improve option */}
+        <div style={{ margin: "0 18px 12px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>Improve Course Data</div>
+          <div
+            onClick={() => { setPreScanCourse(course); setStep("scan"); }}
+            style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.black, cursor: "pointer" }}
+          >
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ width: 18, height: 18, color: C.white }}><Icon.ModRound /></div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: C.white }}>Scan Your Scorecard</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 2 }}>Adds stroke index, yardages and validates hole data</div>
+            </div>
+            <div style={{ width: 14, height: 14, color: "rgba(255,255,255,.4)" }}><Icon.ChevronRight /></div>
+          </div>
+        </div>
+
+        {/* Continue without scanning */}
+        <div style={{ margin: "0 18px 18px" }}>
+          <button className="btn btn-outline" onClick={() => setStep("setup")} style={{ marginBottom: 10 }}>
+            Continue Without Scanning
+          </button>
+          {!hasSI && (
+            <div style={{ padding: "10px 14px", background: "#FFF8E7", border: "1px solid #E08A1E", display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <div style={{ fontSize: 14, flexShrink: 0 }}>⚠️</div>
+              <p style={{ fontSize: 11.5, color: "#7A4A00", lineHeight: 1.55, margin: 0 }}>
+                Without scanning, stroke index won't be available — you'll need to enter it manually hole by hole, and Stableford points may not calculate correctly until you do.
+              </p>
+            </div>
+          )}
+          {hasSI && (
+            <p style={{ fontSize: 11, color: C.ash, lineHeight: 1.5 }}>
+              Course data looks complete — scanning is optional but recommended to verify hole data is current.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── Step: Scan scorecard ──
   if (step === "scan") {
     return (
@@ -2970,7 +3055,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
             setCourse(builtCourse);
           }
           setPreScanCourse(null);
-          setStep("setup");
+          setStep(preScanCourse ? "course" : "setup");
         }}
       />
     );
