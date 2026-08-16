@@ -1,4 +1,178 @@
 import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  deleteUser,
+  onAuthStateChanged,
+  sendEmailVerification,
+} from "firebase/auth";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  collection,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+
+// ─── Firebase initialisation ─────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyB_RlzIPxGENXOv748yrxmQ71WNSNFkNBE",
+  authDomain: "bobba-golf.firebaseapp.com",
+  projectId: "bobba-golf",
+  storageBucket: "bobba-golf.firebasestorage.app",
+  messagingSenderId: "119321001136",
+  appId: "1:119321001136:web:7725ba90a7e430740bcf75",
+  measurementId: "G-SF8VRTLZN3",
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+
+// ─── One-time localStorage → Firestore migration ─────────────────────────────
+// Runs after a new Firebase account is created. Finds the matching old
+// localStorage account by email, migrates all their data (rounds, goals,
+// bag, competitions, active round, handicap history) into Firestore under
+// the new Firebase UID, then clears the old localStorage keys.
+// Safe to run multiple times — if there's nothing to migrate it's a no-op.
+async function migrateLocalDataToFirestore(newUid, email) {
+  try {
+    // Find the matching old account by email
+    const allAccounts = LS.get("bb_accounts") || [];
+    const oldAccount = allAccounts.find(
+      a => a.email?.trim().toLowerCase() === email.trim().toLowerCase()
+    );
+    if (!oldAccount) return; // No old data — fresh signup, nothing to migrate
+
+    const oldId = oldAccount.id;
+    console.log(`[Migration] Found old account ${oldId} for ${email} — migrating to Firebase UID ${newUid}`);
+
+    // 1. Migrate rounds
+    const rounds = LS.get(`bb_rounds_${oldId}`) || [];
+    for (const round of rounds) {
+      await DB.setRound(newUid, round);
+    }
+    console.log(`[Migration] Migrated ${rounds.length} rounds`);
+
+    // 2. Migrate goals
+    const goals = LS.get(`bb_goals_${oldId}`) || [];
+    for (const goal of goals) {
+      await DB.setGoal(newUid, goal);
+    }
+    console.log(`[Migration] Migrated ${goals.length} goals`);
+
+    // 3. Migrate competitions
+    const comps = LS.get(`bb_comps_${oldId}`) || [];
+    for (const comp of comps) {
+      await DB.setComp(newUid, comp);
+    }
+    console.log(`[Migration] Migrated ${comps.length} competitions`);
+
+    // 4. Migrate active round if any
+    const activeRound = LS.get(`bb_active_round_${oldId}`);
+    if (activeRound?.course?.holes?.length > 0) {
+      await DB.setActiveRound(newUid, activeRound);
+      console.log(`[Migration] Migrated active round`);
+    }
+
+    // 5. Clean up old localStorage keys
+    LS.del(`bb_rounds_${oldId}`);
+    LS.del(`bb_goals_${oldId}`);
+    LS.del(`bb_comps_${oldId}`);
+    LS.del(`bb_active_round_${oldId}`);
+
+    // 6. Remove old account from bb_accounts (keep others)
+    const remaining = allAccounts.filter(a => a.id !== oldId);
+    if (remaining.length > 0) {
+      LS.set("bb_accounts", remaining);
+    } else {
+      LS.del("bb_accounts");
+    }
+
+    console.log(`[Migration] Complete — all data moved to Firestore`);
+  } catch (err) {
+    // Migration failing shouldn't block the user from signing in
+    console.error("[Migration] Error:", err);
+  }
+}
+
+
+const DB = {
+  // User profile
+  getUser: async (uid) => {
+    const snap = await getDoc(doc(db, "users", uid));
+    return snap.exists() ? { id: uid, ...snap.data() } : null;
+  },
+  setUser: async (uid, data) => {
+    await setDoc(doc(db, "users", uid), data, { merge: true });
+  },
+  updateUser: async (uid, data) => {
+    await updateDoc(doc(db, "users", uid), data);
+  },
+  deleteUser: async (uid) => {
+    await deleteDoc(doc(db, "users", uid));
+  },
+  // Subcollections
+  getRounds: async (uid) => {
+    const snap = await getDocs(collection(db, "users", uid, "rounds"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+  setRound: async (uid, round) => {
+    const ref = doc(db, "users", uid, "rounds", String(round.id));
+    await setDoc(ref, round);
+  },
+  deleteRound: async (uid, roundId) => {
+    await deleteDoc(doc(db, "users", uid, "rounds", String(roundId)));
+  },
+  getGoals: async (uid) => {
+    const snap = await getDocs(collection(db, "users", uid, "goals"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+  setGoal: async (uid, goal) => {
+    const ref = doc(db, "users", uid, "goals", String(goal.id));
+    await setDoc(ref, goal);
+  },
+  deleteGoal: async (uid, goalId) => {
+    await deleteDoc(doc(db, "users", uid, "goals", String(goalId)));
+  },
+  getComps: async (uid) => {
+    const snap = await getDocs(collection(db, "users", uid, "competitions"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+  setComp: async (uid, comp) => {
+    const ref = doc(db, "users", uid, "competitions", String(comp.id));
+    await setDoc(ref, comp);
+  },
+  deleteComp: async (uid, compId) => {
+    await deleteDoc(doc(db, "users", uid, "competitions", String(compId)));
+  },
+  setActiveRound: async (uid, round) => {
+    await setDoc(doc(db, "users", uid, "meta", "activeRound"), round || {});
+  },
+  getActiveRound: async (uid) => {
+    const snap = await getDoc(doc(db, "users", uid, "meta", "activeRound"));
+    return snap.exists() && snap.data()?.course ? snap.data() : null;
+  },
+  clearActiveRound: async (uid) => {
+    await deleteDoc(doc(db, "users", uid, "meta", "activeRound"));
+  },
+  // Username uniqueness check
+  isUsernameTaken: async (username) => {
+    const q = query(collection(db, "users"), where("username", "==", username.toLowerCase()));
+    const snap = await getDocs(q);
+    return !snap.empty;
+  },
+};
 
 // ─── Brand Assets (base64 embedded) ─────────────────────────────────────────
 const ICON_WHITE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAADUCAYAAAAmyx61AAAaDUlEQVR42u2de7SsZV3HP7+ZOSCIB1HgBKGYphh5wbQMC2+YYVYuKdE0b0hWSmgqablcFiaGuiLxvrLUpYUZRESSiYqXJAwCNaC4yS1AEARBuZw9M9/+eH9P8zLseWf2OXvPzN7z/ay113v27HfPmf3MPJ/39/s9z/s8YIwxxhhjjDHGGGPMfBNugrVDUgtouSWm1+S1owAiQm4WC8uY9XjR6AOyxCwsM9RJIqIv6WeAJ2RHcaS1cvYFds5oKWrRUwDfBW6qnXs3cGX+/BrgVuDWiFha5v1p53P0I6LvZl4/dNwEa0IrJXUY8Ho3x9TpA7cDN0m6BrgAOB/4FnBhRNw5FIEVeTnysrAWmh8C3fxyW0/nQlGOu+bXw4Cn1s65StLZwOeAMyLimqHIS466LKxF7kAdt/X0s/LaUbXv25lm7gs8H7hd0leATwOnR8RNtagLi2t+r0jGbCQiv1opqU5+RaaLvfy6H/Bs4OPAhZL+QtKjI6KfNchWkZexsIyZ1We+nV+qyWtP4DXA+ZJOlnRgTVxtSR6gsrCMmXkkVpdXN/99KHCWpE9L2j8iehGhrHGZGeK6ynzgWsnKJLMtP5vkeTsprjIN5XnAr0r6APD2iLg5peURRQvLka7ZblQTTl1ErRXIrERdZKq4I/D7wK9J+oOI+DuoRhQjoucmt7AWjR5wNYORLNPMrsB9uedk0iKaHWuCWi6KLZHTpBeIep3rwcCnJP0K8LqIuFFSJyK6fkssrEVJA1vARcDjuefwu1k+8lEKa6cRUeo+KZkfS8E8DHgUsB+wuSaqIqH2BJFXSRX7+XsvAn5O0uERcaZTRLP+8xKpk8e3qWJJ96aXx/PcYmv+fuwt6dmS3iPp0qH3oVt7LyZhqfb+vSmfPzz9wRHWwkQOOWQejrBWFG01PV7/eS8irgOuAz4j6Y3AgVQF9UOBLbXUPCZIF0u0FcA7JP0EcERELJV7SP32mI0cYZ1frtJuuTV7PyLnUnWGHn+gpFdLumQo4upPEGn1JW3Nf/+rpD3zOT31YQ1xGGs2fjgWoZxL1a3Jqx0RN0fE+4HHAUcClzKoa40bAQxgE7AEPBP4vKQtEdGztCwsY1ZbXr0ir4j4YYrrAOBNwPdTXL0J0vRNVBNOHw2cUZOW+5aFZczqyyvF1YmIOyLiOKpR21NWEG11atI6RdJ9nOZbWMaspbi6NXFdHhGHAodTravVTiGNk9YSVUH/U1l89z2IFpYxay6uVqaKH00BnVuLosalh0vAcyS9KyeVup5lYRmzpuLqZ6rYiYgLgYOAT00orXLOGyQ9NwVoaVlYxqy5uLoZad0VEb8BvDeF1FTTKnO5+sBfS3ow0HcR3sIyZhrSqhfljwKOZnxNq0U1unh/4MN5245rWRaWMVORloCSIr4beOcE6WGR2iGSjvD8LAvLmFlIa1NEvBH40ITS6gPH5Ux4OTW0sIyZprRKEf1I4Ms017TKGvIPAN6aUx2cGlpYxkxVWsrF+15EtaFrEVNTlPVKSY/EBXgLy5gpS6uf9axrgd9mMCrYFGV1gD9yAd7CMmYW0uqmtE4BThyTGpYo6wW5HI2jLAvLmKnTz1tvXgfcyug1zUqUtQl4TUZZ7nsWljHTTQ2BVkR8B3jHmNSwrA//Akl7lHsX3YoWljHTjrJawAnAlQ3SKqs+7Aq8oCYxY2EZM7UoSxll3QX8Oc0jhqW/vSSP3ibMwjJm6vQyvftbqmkOZUPW5fqbgAMkPTZ3k3YftLCMmXqU1Y6Im4FPjImeeim057oPWljGzIoyYviJTAnbY/rcszK6clpoYRkz9Sirn8dvAOcwemnl0ucOAPZxWmhhGTMrSlR1Sh7VkBbuAPxs8Z2bzsIyZtoUQZ0xJi0s5z3ZwrKwjJkVZTrDfwFXM3qKQ9TSQnAdy8IyZtpkPaodEUvA1xvSwtLv9pO0OX/PUZaFZcz0vZXHcxqEVR5/IPAQp4UWljGzogjqmw19rKSKATzUwrKwjJm1sK6gWj65NSLKKo/tY2FZWMbMWljfAW4akxYC7O0ms7CMmTV3At+f4LwHuKksLGNmQpm5njPfr5sgwtptgnOMhWXM1NLDZd2Wx70sLAvLmPVC101gYRmzbrJIN4GFZYz7oBvLGLMC+hOcc6ebycIyZpaUNa42N52TxyvcFy0sY2ZlqqjtO7hnPhzugxaWMfNIkdP9GcyxahLWNW4yC8uYWbMFuF+mfk3CutZNZWEZM+sIa1+ad4Iu511dskk3nYVlzKyE9cgGEYlq+eR+LcKysCwsY6ZOEc/jhwS2HDdZWBaWMbMxVTVC2JO0ieYdcUqaeHlE3F4bWTQWljFTTwf3o6phaUQfK3L6Rh7bbjoLy5ip96fcTOLpKaHeGLF91emghWXMrOhnaveshnSwRFRbgbMtLAvLmKmTdai+pL2Bgxr6V6lfXQJcVX7PLWhhGTNNSh3q14H7Uq1zNargLuCzKSrXrywsY6afDmb96sVj0sFW/ux0p4Mrp+MmWOg0plW7aIlBDcasrB3LJNAnAU/If7dHRFctqhUazi7TINyCFpaZgExJ+kOdr5Picl1lZW0pSUcNiWmUsE6KiDuzrb1EsoVlxkVWWSDeHzgKuAX4PHBmRHRrUYMsrsmiK0k/CTyXwW03o9LBPnBiTWDGzPxD3Mnj21SxpHvTy+P5eW5M8fW18vjVodf0DUlHS9q3dm5Iak/z9a1DYSHpxIb3WpK6kvqSvlp/D4yxsJpfW+RxF0k35mvbWns9knSbpI9K+rnhzumOdq/2CEn7Zzv2UkqjhCVJL65/RszK8Idvcbkf1fB7J79KutLNn70M+DdJX5L0Ukm7RkQvU8l2iSwWnHIP4LHZhqPWviq1q6uAk/Ki4WK7hWVWQJkPNPx5KB2vl8enAB8DvinpTyU9PMXVK5HCIqaLktoR0ZX0HOA52V7thrYO4MMRcSfQ9mishWVWMXLIzlcigR7VzbxvTnF9StLTc1i+myNkC5Mu5t8pSbsDH6R5VdEyxeG7wAcdXVlYZm1pM1hsrgvsBDwf+AJwjqTflfSAWrrY2shF+vy7Wjl6+nGqreb7DX2pRFd/HhG3OrqysMz0PivD6eLjgQ8AF0h6r6THRkQ/5aVMFzfaZ6yTqeA7gF9KibfHRFffBt6TbeHoysIyM0oX+9kB9wKOBM6T9K+Sfl3SzpkubpioS9KmiFiSdCTwpjGyqkdXR2ftygv1WVhmxp+fdkZb3fz+mcDfA9+Q9BZJj1gm6lpX4sqpC3VZvZdBkX3U39LLiPTUiPiHLNI7urKwzJxEXfV0sQc8HDiGqkj/d5IOkdRZb0X6Ws1qSdLv1WTVapBVKcLfCrw2n8ORlYVl5jRdrBfp7wMcBvwLcL6k10r60VqRPuY16sqoSLlO+7HACRPIilq0+aqIuJJBkd5YWGaOP1v1qKsPPAo4nqpI/zFJT0ohzFXUVSSaotpN0knAH04oqyVgE/DBiDixPI8/DhaWWV9RV30m/f2BlwJfk3SWpFdJ2mMo6ppJkb4WVXXz1qSzgV9jUGAfF1ltolqr/ai8G8CysrDMBom6BBwIvB/4lqT3SfqZkoZNc2pEGcnMqOo+mQJ+BXgEgwJ6E+Wci4Dnlb/Po4IWltk4UVd9asSPAK8Gvi7py5J+U9LmtZ4akc/bKSOZkp4G/HumgOX1jbtvsowY3ggcEhE3UE1hcN3KwjIb8DNYnxoB8GTgE1S1rndK2n81p0bUUs5WPm9X0iMlfRL4InAAgzXZx/WRkipem7K6pgjQb62FZTZ21NWpRSw94EHA0VSji6dLOlTSjttapK+lfarVyx4j6QTgXOBFKc4+ky1uuZTnXQgcGBHnl5ui/XauDV6Tx8wjJQUrta4dqPb6exZwsaSPA38TEVcXEU0S0ZRzJO0BHAy8kOr2mvZQajcueiuvaxPwZeAFEfEdTw51hGUcdQ1PjdiPav2pb0r6K0k/XUYWmyKrPD4sZXcR1TLFv8Jgh+ampY1Hva6PAM+0rCwsY4YFUZ8asQTsChwO/Iekt5QUcRlZlRVWdwT+EXgJsHst7dSEURW1dPF7wKsj4reApYzwLCunhMbcKw1rZSpWuAi4sSHCKjsyP5hq4uoSg9n4K6WMGL4pIv4ylzmWZWVhGVME0a9FWOXzejnw2YyYvlirX/WWzwgVwM3AbcDmlNa2ZBglwjtO0hbg2JRhx4V2p4RmcSXVZbAoXidldT3V6p7PAB4VEUdGxOfLHC1Gh1fKKOt7mQ5+OyO0Vi1qW0lq2gJ2A94GfEnSfjktwhd/C8sssKRawDVUq3o+F9g/Il4VEV+IiLtyLlY7l2luHCEsRfmIOBV4LPA7wDm1yK1EZ5POSi9zxg6iWnX1eSktb4dm1mGxZX1s87VF0g/yNYzammot6WW7DP/fl+XqpQdLuu/Qa29vjxSGi/KSfkHSp4e2OFtaQXt0a/8+prSvpbV2OIw1046kSuG6VYvwL6VafuZU4KyIuGsZyfS3t7idt94E1brq3Yg4AzhD0uOA36K6IXvnWsQ1rjBfZuj3gbfkBrQvr162vKSMcYS1DiOsUZHUxZKOl/TUnHJwj/abRno1PFNe0iMkvV/SnbXX3pvw79yax5NyRr0jLWNhrRNh9Ub8zUVST5G0wywkNaJNWvV0UdKjalvPD6d+k0jr5O1NX42xsNZWWKMk9a15lNSE4nqmpP+stVFvBdL6dO1vtLSMhTUHwholqfMk/Ymkxw//XfMmqXHikrRJ0jErjLaKtN5Z/zwYY2FNV1j97LCNklquPdZjelR/zbnT9ZUN7+cw5ZyXWVqrhxvRjO23VKNgYjCJs3AecBpwWkT85zLS7pf1ptbjH15GFXMm+xclHQj8LfBUqnlYTf2n3FT9YUkXRsQ5vkHawjLTldQS1WqcpwJnRsT5G01Sy0hLQDeldb2kXwI+DLx4jLQiv3YATszI8wc5gdXLJltYZhXoLSOprTVJnR4RF290SY0QVzfnVt0JvETSVuAVDHbJWY5WSu1hwPERcXi2l+87tLDMKlAkdTdwVk1Sl9YEVW5n2fCSWkZa5b7FiIgjctRzXKRVBPVySSdHxGecGlpYZvtTQIAvUa2A8C9NklrkCKG2IUYLOALYm2r10qaZ8eVG6w9Jegzwfc+EN/PT+9fvKOFD6+dNa4utdfoel1VM7y/p0qH3tGnU8AP5e2234srxh9HU2SUl1antyOwoYHSk1Y6IW4HnZxotRq/4UEYNXynpsTkCaWlZWGY7KDUpS2oyafVS7ucBb6hJadnTa+J691AqbiwsY6YirTLl4X3AP1PVhXtjoqxnSDqoRGluRQvLmKlGplkbPAq4PaOpcdHTWx1lWVjGzCLK6lOtsXUFcAyDtd9HRVl94GBHWRaWMbOilyOHJ1BtktEkrfL4UW42C8uYWURZZbOLrcAbx6SFZaXSX5a0bxbv3RctLGOmKq1eTgg9mWqTixbLF+AjH78P1U4+7osWljEz7VPH07ybdPnZYRld+VYdC8uYqVM2ujiFqpZViuyj0sL9gQMiQi6+W1jGTDstFNWI4V1UeyrC6OJ7L/vgrw5FXcbCMmZqFEGdxOCmaDWkhU8dIzZjYRmzZlFWWYbmf6hWZY0RMir976ck7VF2qHYLWljGTL1vZXp4Wn4/KsLqA/cDHuM+aWEZMyuKoL6Qx/aY9PEJQ2misbCMmRpFRBcCNzN6ImkR1AENkZixsIxZO3KaQisivg9cMCSx5YS1X8M5xsIyZmr9638aoqcirAdJ2pyic1poYRkzMy5oCsbyuBnYY+gxY2EZM3WuGiMiUe1fuIebysKa+/fAKcCGpdSjrhvT38p5+7hfWljzSpHU3oBrFxuTUrP6HnAX41ci3eQms7DmnTazqVn08RD6tLgFuHMCsf24m8rCWi9X4WlHdjtTbZhgac1PP/NqDRaWGSGsvagWkBMelVqbhq5uzQG4Fbh+gguULx4WlnHnmLm4+kDXLWFhGbPeIltjYRlHWG5vC8tsRMqcn2uBO/Iz4M60lqaqlj72lAULy2wHvRRVr/Zvpy2rK6rSnrtSDXKMSw3d/haWGdGRfgDcTTWU3qGaJ/S/Tl/WLB2cpE2X3FQWlqlfwgcbfv6Aak+8s4FzgZdGxC25JIqFtUrNncfdgV0aotjy2BVusmY6boKFlFY/j58BPlOPvMrPzKoKa0+qGlZ/jLBuc4RrYTn9G027lq60GOypNyoyM9smrH3GiKic55TcwlpYUbUAjRFNfTJjfxWezyzPTzSIqKSJPwS+a2FZWAsZVZXUTtIOwAO24+n6wE1OFbftrcjjo8ecE8ANwI2OZi2shYuscn+7XwTeDuwGbGHbh8y7wA2S/gt4JdVSKe5Uk100epJ2BB6XD7capHZ5RCyV988taGEtRCepDtoB+AiD2sn2shl4OHBVRLxOUgffGzeOsvbVI4CHMKgTjhLWRTWpWVgW1kLQyqv6o6kWBuxmB9jeCYnleX4+v++5qce/F5JEtQ19ZBt2RogN4Cw3mYW1yFf3SMmsxly7ssjgfZ0OTh7w5iqyhzSdk217F/D1fMzRVdNVwE2woehnWngRVQG3tUrRUC+FdUmmnl5orjk1L5HuvsDTamIalQ5eAlzteXAW1mKFVYNZ7HcAh1Pd6tHezqt2n2rSYxc43uvOr6hfPQfYqSb85doW4Mx873whsLAWTlp9Se2IOB04lOoewW0t5Pbzd28ADomIr6QQXcMaHV0F1QTcFvDbY/pZefykoYjLWFgLJa2epE5E/DPw5Fp6uBJpldtIrgWeEhFfSBE6ZWmmREnPBvbP6KrVcDH4NvAfKTq3rYW1sNLqprTOBX6BaueWSa/i5XadHnBYRFwsaZMjq8mCrEzvXjvBBQHglIjYCrQ9mGFhWVqVaL4FvHwFUVY/I4U/i4iz8jm89Mn4dLCd0e3BVMX2PqPrUu28IHx0SGDGwlpoaS1lpHUq8E+1jtIUXbWodnk5LmsxniQ6sbMUwLto3jS1tP+ZEXGhZ7dbWGb5jvT24rGGc8uI1vtyzSyvjzVZA3dSOq+guhWnR/OoXwAnTPB+GAtr4aKsckU/F7iA5vlZ7YyoTnYheGJZBdUcuN2BYxm97lW5ILSA84DTy5wtt6KFZYZElBHAmbXUb5jS0a4ELsvIytHV5G17ArAHo+8brEdXx6SoHF1ZWKaBK5uChTxelsVjj1xNlgp2Jb0Y+I2MTtsN0VU7I93THF1ZWGaCaGACYV1eiwTMaFm1U1b7A+9jfN2q8LqMyNy+FpYZI6MrJpCRpzCMl1WLqm61C3Ay1RI8QXPtqg2cGBFfLVMg3JIWlmnmjgnO8ZW/WVZR6z//CDyS0TPaYVAbvA04uqxb5pa0sIzf82lEVmVVhY8AB9NctyrCagGvj4hrqaaKePR1G/B6WMasQFa1tfL/CnhZps9N29CXhftOi4iPOBW0sIyZhqzKaOBOwN9T3dzcHSOrfvaxG4BXlJ2H3JpOD4xZS1ltSlntC5xRk1XTBV8prD7wwoj4bi2VNI6wjFl1UbWpVl9YkvR04JPAXhPIilr09dqI+GKJ0NyqjrCMWW1RRQqmlwsi/nFGVntRjQaOk1Wpax0fEe+xrBxhGbMmoiJ3HgK6kp4IvJNqEcSS4o2bGFpkdXJuiTZudQxjYRmzIlG1UlRdquWNfwQ4Gjgq+0hJAcfNT/t/WQGHpaz6vr3JwjJmVaIpqhpVn8FqC4cDb6C6iZkJU8C6rE4Cnp8RmSwrC8uY7RFUpEh6JVWT9HDgpcARwJaaqFoTpIAlVdwE/CXwO/mY92+0sDYskR0qqs2C1/b/WOHrmcVtOpO+zlG/ey+hpDx6NYFtAZ4BPA84BNhxhaIq57bz680RcWxpL8vKwtrI3D2Ftae62VG3TnJuvp5Z3QS96u0gaVeqXWyeRFVEPwjYbah92ky+N2Cpa90OHB4RJ7lmZWEtAi3gQZJuo3kd8O2ljFb96ATnbpa0F4OC87TZE9g522IlkdYD80t53AI8BPixPO65TIRU3oNJ+0K5kbkDnAO8PNdl99QFC2tjp4F53BU4n+ndsrFDTWCjPg8vA144w7bZeQ0jt7LK56Rp3/DvdvJ4HNWqoXdbVhbWoolrpzn8XMz6s9HfhohzVFpdL7iv9O+qi6pDtVroayLirEw1W5aVhbVoTLvmEXP4mpYTzKSvdS2jsSKqm6h2HXpv2Vkb6PneQAtrkdNDv6bZU25YLqK6g2qz07dHxPWOqiwsY+ZFUq3a1y3AicB7IuKSFFUnIrqOqiwsY6ad7vUZbMfVqqWg/w18DPhkRFyXoirTFRxVWVjGrJqElvt++NjOdLc+Qng18Fmq22q+FBFLNVHJK4RaWIvUicotIPNSE6oXtMdFIOuF5f6mpva+Bfgm8DWqZWPOjYgf/v8fPyioW1QW1kKxIyubPT1PAlhvr7mkeAHcnVLqAf9LtUTxtzPduxi4OCJuvIehq2gKp37z/8E0qx1WSRERkvTjwEMZFHRnSStfxxOBY0a8pnJv3CnAh2q/M88RbFCN5F3PYN7W3cDNmc7dNeI9KnWr+r2GxhHWAl4F8sMfEZcBl82ZTLu1zr6cAKDaqv5zG+XiwWDSKDVB9ddZ2mssrDXvLK05imLLvYS7TJLKZoo0q3sJtzXautf3w6s0GAvLjI605uYKLomcoT3Ja1KeGy48m3nCm1AYYywsY4yxsIwxFpYxxlhYxhhjYRljLCxjjLGwjDHGwjLGWFjGGGNhGWOMhWWMsbCMMcbCMsYYC8sYY2GZDYFW6RxjLCyz5nQYbNiwnKh6/lyYef7wmsXie9xz49D6CqTtfPxuN5MxZra5oNSS1Jb0AUm3SerrnmyV9BVJ+0iK3MDBmLnBH8jFldcewO7AA/Nz0AOujYir3DrGmLmKtMb83BcyM5f8H8CTpeiIg9KTAAAAAElFTkSuQmCC";
@@ -955,56 +1129,91 @@ function ResetPasswordScreen({ onBack, onReset, deviceIsTrustedFor }) {
 
 function AuthScreen({ onAuth, onShowReset }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", handicap: "", securityQuestion: SECURITY_QUESTIONS[0], securityAnswer: "" });
+  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", dob: "", handicap: "" });
   const [error, setError] = useState("");
-  const [usernameStatus, setUsernameStatus] = useState(null); // null | "checking" | "ok" | "error"
+  const [loading, setLoading] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState(null);
   const [usernameError, setUsernameError] = useState("");
-  const emailRef = useRef(null);
-  const passwordRef = useRef(null);
 
-  const handleUsernameChange = (val) => {
-    // Usernames don't have spaces — strip them as the person types rather
-    // than rejecting after the fact
+  const handleUsernameChange = async (val) => {
     const cleaned = val.replace(/\s/g, "");
-    setForm({ ...form, username: cleaned });
+    setForm(f => ({ ...f, username: cleaned }));
     if (!cleaned) { setUsernameStatus(null); setUsernameError(""); return; }
-    const acc = LS.get("bb_accounts") || [];
-    const err = validateUsername(cleaned, acc);
-    if (err) { setUsernameStatus("error"); setUsernameError(err); }
-    else { setUsernameStatus("ok"); setUsernameError(""); }
+    const fmtErr = validateUsername(cleaned, []);
+    if (fmtErr) { setUsernameStatus("error"); setUsernameError(fmtErr); return; }
+    setUsernameStatus("checking");
+    const taken = await DB.isUsernameTaken(cleaned);
+    setUsernameStatus(taken ? "error" : "ok");
+    setUsernameError(taken ? "Username already taken." : "");
   };
 
-  const submit = () => {
-    setError("");
-    // Defensive fallback: some autofill flows (notably iOS Safari/iCloud
-    // Keychain) can populate the visible input without reliably firing the
-    // React onChange that keeps `form` state in sync. If the DOM field shows
-    // a value but our state doesn't, trust the DOM at submit time.
-    const emailRaw = form.email || emailRef.current?.value || "";
-    const password = form.password || passwordRef.current?.value || "";
-    // Emails are case-insensitive by convention, and autofill/typing can add
-    // stray leading/trailing whitespace — normalize before any comparison so
-    // "Josh@x.com" and "josh@x.com " are correctly treated as the same account.
-    const email = emailRaw.trim().toLowerCase();
-    const acc = LS.get("bb_accounts") || [];
-    if (mode === "signup") {
-      if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
-      if (!form.securityAnswer.trim()) { setError("Please answer the security question — it's used to verify it's really you if you ever need to reset your password on a different device."); return; }
-      if (acc.find(a => a.email?.trim().toLowerCase() === email)) { setError("An account with this email already exists."); return; }
-      const usernameErr = validateUsername(form.username, acc);
-      if (usernameErr) { setError(usernameErr); return; }
-      const u = {
-        id: Date.now(), name: form.name, username: form.username, email, password,
-        handicap: form.handicap ? parseFloat(form.handicap) : null,
-        securityQuestion: form.securityQuestion, securityAnswer: normalizeAnswer(form.securityAnswer),
-        handicapHistory: [], bag: [], joined: Date.now(), friends: [], friendRequests: [],
-      };
-      LS.set("bb_accounts", [...acc, u]);
-      onAuth(u);
-    } else {
-      const u = acc.find(a => a.email?.trim().toLowerCase() === email && a.password === password);
-      if (!u) { setError("Incorrect email or password."); return; }
-      onAuth(u);
+  const submit = async () => {
+    setError(""); setLoading(true);
+    const email = form.email.trim().toLowerCase();
+    const password = form.password;
+    try {
+      if (mode === "signup") {
+        // Age check — must be 16 or older
+        if (!form.dob) { setError("Please enter your date of birth."); return; }
+        const dob = new Date(form.dob);
+        const today = new Date();
+        let age = today.getFullYear() - dob.getFullYear();
+        const m = today.getMonth() - dob.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+        if (age < 16) { setError("You must be 16 or older to use Bobba Golf."); return; }
+
+        if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
+        if (usernameStatus !== "ok") { setError("Please choose a valid, available username."); return; }
+
+        // Create Firebase Auth account
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        const uid = cred.user.uid;
+
+        // Send email verification
+        await sendEmailVerification(cred.user);
+
+        // Create Firestore profile — include bag and handicapHistory from
+        // old localStorage account if it exists, so nothing is lost
+        const oldAccounts = LS.get("bb_accounts") || [];
+        const oldAccount = oldAccounts.find(
+          a => a.email?.trim().toLowerCase() === email
+        );
+        const profile = {
+          id: uid,
+          name: form.name,
+          username: form.username.toLowerCase(),
+          email,
+          handicap: oldAccount?.handicap ?? (form.handicap ? parseFloat(form.handicap) : null),
+          handicapHistory: oldAccount?.handicapHistory || [],
+          bag: oldAccount?.bag || [],
+          bagCompleted: oldAccount?.bagCompleted || false,
+          friends: [],
+          friendRequests: [],
+          joined: Date.now(),
+        };
+        await DB.setUser(uid, profile);
+
+        // Migrate all existing localStorage data (rounds, goals, comps etc)
+        // into Firestore under the new Firebase UID — this preserves all
+        // data from the old localStorage-based system transparently.
+        await migrateLocalDataToFirestore(uid, email);
+
+        onAuth(profile);
+      } else {
+        // Sign in
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        const profile = await DB.getUser(cred.user.uid);
+        if (!profile) { setError("Account not found — please sign up."); await signOut(auth); return; }
+        onAuth(profile);
+      }
+    } catch (e) {
+      if (e.code === "auth/email-already-in-use") setError("An account with this email already exists.");
+      else if (e.code === "auth/wrong-password" || e.code === "auth/user-not-found" || e.code === "auth/invalid-credential") setError("Incorrect email or password.");
+      else if (e.code === "auth/weak-password") setError("Password must be at least 6 characters.");
+      else if (e.code === "auth/invalid-email") setError("Please enter a valid email address.");
+      else setError(e.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1026,7 +1235,7 @@ function AuthScreen({ onAuth, onShowReset }) {
         {mode === "signup" && (
           <div className="field">
             <label className="field-label">Full Name</label>
-            <input className="input" placeholder="Your name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <input className="input" placeholder="Your name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
         )}
         {mode === "signup" && (
@@ -1040,90 +1249,55 @@ function AuthScreen({ onAuth, onShowReset }) {
                 onChange={e => handleUsernameChange(e.target.value)}
                 style={{ paddingRight: 38, borderColor: usernameStatus === "error" ? C.red : usernameStatus === "ok" ? "#1B7A3D" : undefined }}
               />
-              {usernameStatus && (
+              {usernameStatus && usernameStatus !== "checking" && (
                 <div style={{ position: "absolute", right: 13, top: 15, width: 16, height: 16, color: usernameStatus === "ok" ? "#1B7A3D" : C.red }}>
                   {usernameStatus === "ok" ? <Icon.Check /> : <Icon.X />}
                 </div>
               )}
             </div>
-            {usernameStatus === "error" && (
-              <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{usernameError}</p>
-            )}
-            {usernameStatus === "ok" && (
-              <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{form.username} is available</p>
-            )}
+            {usernameStatus === "error" && <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{usernameError}</p>}
+            {usernameStatus === "ok" && <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{form.username} is available</p>}
           </div>
         )}
+
         <div className="field">
           <label className="field-label">Email</label>
-          <input
-            ref={emailRef} className="input" type="email" name="email" autoComplete="email" placeholder="you@email.com"
-            value={form.email}
-            onChange={e => setForm({ ...form, email: e.target.value })}
-            onInput={e => setForm(f => ({ ...f, email: e.target.value }))}
-            onBlur={e => { if (e.target.value && e.target.value !== form.email) setForm(f => ({ ...f, email: e.target.value })); }}
-          />
+          <input className="input" type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} autoComplete="email" />
+          {mode === "signup" && (
+            <p style={{ fontSize: 10.5, color: "#1B7A3D", marginTop: 5, lineHeight: 1.5 }}>
+              ⚡ If you've been using the app already, use the same email — your rounds, handicap and data will be transferred automatically.
+            </p>
+          )}
         </div>
-        <div className="field" style={{ marginBottom: mode === "signup" ? 18 : 10 }}>
+
+        <div className="field">
           <label className="field-label">Password</label>
-          <input
-            ref={passwordRef} className="input" type="password" name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="••••••••"
-            value={form.password}
-            onChange={e => setForm({ ...form, password: e.target.value })}
-            onInput={e => setForm(f => ({ ...f, password: e.target.value }))}
-            onBlur={e => { if (e.target.value && e.target.value !== form.password) setForm(f => ({ ...f, password: e.target.value })); }}
-          />
+          <input className="input" type="password" placeholder={mode === "signup" ? "Minimum 6 characters" : "Your password"} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
         </div>
-        {mode === "login" && (
-          <div style={{ textAlign: "right", marginBottom: 20 }}>
-            <button onClick={onShowReset} style={{ background: "none", border: "none", color: C.steel, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-              Forgot password?
-            </button>
-          </div>
-        )}
-        {mode === "signup" && (
-          <div className="field" style={{ marginBottom: 30 }}>
-            <label className="field-label">Handicap Index <span style={{ textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
-            <input className="input" type="number" placeholder="e.g. 14.2" min="0" max="54" step="0.1" value={form.handicap} onChange={e => setForm({ ...form, handicap: e.target.value })} />
-          </div>
-        )}
-        {mode === "signup" && (
-          <>
-            <div className="field">
-              <label className="field-label">Security Question</label>
-              <select
-                className="input"
-                value={form.securityQuestion}
-                onChange={e => setForm({ ...form, securityQuestion: e.target.value })}
-                style={{ appearance: "none" }}
-              >
-                {SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 30 }}>
-              <label className="field-label">Your Answer</label>
-              <input className="input" placeholder="Your answer" value={form.securityAnswer} onChange={e => setForm({ ...form, securityAnswer: e.target.value })} />
-              <p style={{ fontSize: 10.5, color: C.steel, marginTop: 6, lineHeight: 1.5 }}>
-                Used to verify it's really you if you reset your password from a different device. Remember exactly what you type.
-              </p>
-            </div>
-          </>
-        )}
 
-        {error && (
-          <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginBottom: 20, fontSize: 12.5, color: C.black, fontWeight: 500 }}>
-            {error}
+        {mode === "signup" && (
+          <div className="field">
+            <label className="field-label">Date of Birth</label>
+            <input className="input" type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
+            <p style={{ fontSize: 10.5, color: C.ash, marginTop: 5 }}>You must be 16 or older to use Bobba Golf.</p>
           </div>
         )}
 
-        <button className="btn btn-primary" onClick={submit}>
-          {mode === "signup" ? "Create Account" : "Sign In"}
+        {mode === "signup" && (
+          <div className="field">
+            <label className="field-label">Starting Handicap <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional</span></label>
+            <input className="input" type="number" step="0.1" min="0" max="54" placeholder="e.g. 14.2" value={form.handicap} onChange={e => setForm(f => ({ ...f, handicap: e.target.value }))} />
+          </div>
+        )}
+
+        {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
+
+        <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
+          {loading ? (mode === "signup" ? "Creating account…" : "Signing in…") : (mode === "signup" ? "Create Account" : "Sign In")}
         </button>
 
-        {mode === "signup" && (
-          <p style={{ fontSize: 11, color: C.steel, textAlign: "center", marginTop: 20, lineHeight: 1.6 }}>
-            By joining you agree to receive club updates from Bobba Golf.
-          </p>
+        {mode === "login" && (
+          <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={onShowReset}>Forgot password?</button>
         )}
       </div>
 
@@ -1145,75 +1319,75 @@ export default function App() {
   const [showReset, setShowReset] = useState(false); // password reset flow
   const [briefing, setBriefing] = useState(null); // login welcome-back popup: { briefing, hasNoRounds } | null
 
+  // ── Firebase Auth session listener ──
+  // Replaces the old LS.get("bb_user") approach. Firebase handles the session
+  // token securely — we just listen for auth state changes and load the user
+  // profile from Firestore when they're signed in.
   useEffect(() => {
-    if (!splash) {
-      setUser(LS.get("bb_user"));
-    }
-  }, [splash]);
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const profile = await DB.getUser(firebaseUser.uid);
+        if (profile) {
+          setUser(profile);
+        } else {
+          // Auth record exists but no Firestore profile — sign them out cleanly
+          await signOut(auth);
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+      setSplash(false);
+    });
+    return () => unsub();
+  }, []);
 
-  // Build the "welcome back" briefing every time a user becomes logged in —
-  // this covers both a fresh sign-in (AuthScreen -> onAuth) and reopening
-  // the app with an already-saved session (the effect above), since both
-  // count as "a login" per the brief. Shows the same message every login
-  // until a new round is submitted, since it's always built fresh from
-  // whatever the most recent round currently is.
+  // Build the "welcome back" briefing every time a user becomes logged in
   useEffect(() => {
-    if (!user || !user.username) { setBriefing(null); return; } // not logged in yet, or mid SetUsername flow
+    if (!user || !user.username) { setBriefing(null); return; }
     const rounds = LS.get(`bb_rounds_${user.id}`) || [];
     if (rounds.length === 0) {
       setBriefing({ briefing: null, hasNoRounds: true });
       return;
     }
-    // Pick by the round's actual DATE PLAYED, not by array/submission order —
-    // a round can be logged into the app after the fact (e.g. submitting a
-    // 1 June round after already having a 25 June one logged), so the most
-    // recently ADDED round isn't necessarily the most recently PLAYED one.
     const mostRecentByDate = [...rounds].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
     setBriefing({ briefing: buildLastRoundBriefing(user, mostRecentByDate), hasNoRounds: false });
   }, [user?.id]);
 
-  const updateUser = (u) => {
-    const acc = LS.get("bb_accounts") || [];
-    LS.set("bb_accounts", acc.map(a => a.id === u.id ? u : a));
-    LS.set("bb_user", u);
+  const updateUser = async (u) => {
+    await DB.setUser(u.id, u);
     setUser(u);
   };
 
-  const deleteAccount = () => {
-    if (!user) return;
-    const uid = user.id;
-
-    // Remove this user's own account record
-    const acc = LS.get("bb_accounts") || [];
-    const remaining = acc.filter(a => a.id !== uid);
-
-    // Strip any reference to this user from everyone else's friends/requests,
-    // so deleting an account doesn't leave dangling ghosts in other inboxes
-    const cleaned = remaining.map(a => ({
-      ...a,
-      friends: (a.friends || []).filter(fid => fid !== uid),
-      friendRequests: (a.friendRequests || []).filter(fid => fid !== uid),
-    }));
-    LS.set("bb_accounts", cleaned);
-
-    // Wipe this user's own per-user storage (rounds, active round, sent requests)
-    LS.del(`bb_rounds_${uid}`);
-    LS.del(`bb_active_round_${uid}`);
-    LS.del(loungeKey(`sent_${uid}`));
-
-    // Note: public Discussion topics/comments and Looking to Play posts authored
-    // by this user are intentionally left in place — they're shared content other
-    // members may have replied to, so we don't retroactively delete them. They'll
-    // continue to show the departed member's name as the original author.
-
-    LS.del("bb_user");
+  const handleLogout = async () => {
+    await signOut(auth);
     setUser(null);
   };
 
-  if (splash) return <><style>{css}</style><SplashScreen onDone={() => setSplash(false)} /></>;
+  const deleteAccount = async () => {
+    if (!user) return;
+    const uid = user.id;
+    const firebaseUser = auth.currentUser;
+
+    // Delete Firestore data
+    await DB.deleteUser(uid);
+    LS.del(`bb_rounds_${uid}`);
+    LS.del(`bb_active_round_${uid}`);
+
+    // Delete Firebase Auth account
+    if (firebaseUser) {
+      try { await deleteUser(firebaseUser); } catch (e) {
+        // If delete fails (needs recent login), sign out anyway
+        await signOut(auth);
+      }
+    }
+    setUser(null);
+  };
+
+  if (splash) return <><style>{css}</style><SplashScreen onDone={() => {}} /></>;
   if (!user) {
     if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} deviceIsTrustedFor={isDeviceTrustedFor} /></>;
-    return <><style>{css}</style><AuthScreen onAuth={u => { LS.set("bb_user", u); markDeviceTrusted(u.id); setUser(u); }} onShowReset={() => setShowReset(true)} /></>;
+    return <><style>{css}</style><AuthScreen onAuth={setUser} onShowReset={() => setShowReset(true)} /></>;
   }
 
   // Accounts created before usernames existed have no username at all —
@@ -1351,18 +1525,18 @@ export default function App() {
             <HomeScreen
               user={user}
               onOpenModule={setModulePage}
-              onLogout={() => { LS.del("bb_user"); clearDeviceTrust(user.id); setUser(null); }}
+              onLogout={handleLogout}
               onReviewRound={setReviewRound}
               onOpenProfile={() => setTab("profile")}
             />
           )}
-          {tab === "profile" && <ProfileScreen user={user} onUpdate={updateUser} onLogout={() => { LS.del("bb_user"); clearDeviceTrust(user.id); setUser(null); }} onDeleteAccount={deleteAccount} />}
+          {tab === "profile" && <ProfileScreen user={user} onUpdate={updateUser} onLogout={handleLogout} onDeleteAccount={deleteAccount} />}
         </div>
         <nav className="bottom-nav">
           {[
             { id: "home", label: "Home", icon: <Icon.Home />, action: () => setTab("home") },
             { id: "profile", label: "Profile", icon: <Icon.Profile />, action: () => setTab("profile") },
-            { id: "logout", label: "Sign Out", icon: <Icon.Logout />, action: () => { LS.del("bb_user"); clearDeviceTrust(user.id); setUser(null); } },
+            { id: "logout", label: "Sign Out", icon: <Icon.Logout />, action: handleLogout },
           ].map(n => (
             <button key={n.id} className={`nav-btn ${tab === n.id ? "active" : ""}`} onClick={n.action}>
               {n.icon}<span>{n.label}</span>
