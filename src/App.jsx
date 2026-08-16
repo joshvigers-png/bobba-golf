@@ -2589,11 +2589,18 @@ Rules:
 
 function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const savedActive = LS.get(`bb_active_round_${user.id}`);
-  const [step, setStep] = useState(savedActive ? "card" : "search"); // search | scan | setup | card
+  // Only restore to card if the saved course has valid holes — a course with
+  // no holes (e.g. API failed mid-setup) would lock the user in a broken state.
+  const savedIsValid = savedActive && savedActive.course?.holes?.length > 0;
+  if (savedActive && !savedIsValid) {
+    // Clear the broken saved state so we don't loop back to it on every open.
+    LS.del(`bb_active_round_${user.id}`);
+  }
+  const [step, setStep] = useState(savedIsValid ? "card" : "search");
   const [query, setQuery] = useState("");
-  const [course, setCourse] = useState(savedActive?.course || null);
-  const [setup, setSetup] = useState(savedActive?.setup || { date: new Date().toISOString().slice(0,10), tee: "white", conditions: "Dry" });
-  const [scores, setScores] = useState(savedActive?.scores || {});
+  const [course, setCourse] = useState(savedIsValid ? savedActive.course : null);
+  const [setup, setSetup] = useState(savedIsValid ? savedActive.setup : { date: new Date().toISOString().slice(0,10), tee: "white", conditions: "Dry" });
+  const [scores, setScores] = useState(savedIsValid ? savedActive.scores : {});
   const [submittedRound, setSubmittedRound] = useState(null);
   const [preScanCourse, setPreScanCourse] = useState(null); // API course being improved by scan
 
@@ -3258,7 +3265,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       </div>
 
       <div className="page-head" style={{ padding: "20px 22px" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={() => { LS.del(`bb_active_round_${user.id}`); onBack(); }} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Save & Exit
         </button>
         <h1 style={{ fontSize: 22 }}>{course.name}</h1>
@@ -3269,6 +3276,22 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       {front.map(h => <HoleRow key={h.n} h={h} />)}
       <div className="section-head"><span className="section-title">Back Nine</span></div>
       {back.map(h => <HoleRow key={h.n} h={h} />)}
+
+      {/* Safety net — if somehow we got here with no holes, show an escape */}
+      {front.length === 0 && back.length === 0 && (
+        <div style={{ margin: "24px 18px", padding: "16px", background: "#FFF8E7", border: "1px solid #E08A1E" }}>
+          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>No hole data available</div>
+          <p style={{ fontSize: 12.5, color: "#7A4A00", lineHeight: 1.55, marginBottom: 14 }}>
+            This course doesn't have hole data loaded. Go back and scan the physical scorecard to add hole data before starting your round.
+          </p>
+          <button className="btn btn-primary" onClick={() => {
+            LS.del(`bb_active_round_${user.id}`);
+            setCourse(null);
+            setScores({});
+            setStep("search");
+          }}>Start Over</button>
+        </div>
+      )}
 
       <div style={{ padding: "8px 18px 24px" }}>
         <button className="btn btn-primary" disabled={holesPlayed===0} onClick={finishRound} style={{ opacity: holesPlayed===0?0.4:1 }}>
