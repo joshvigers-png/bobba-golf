@@ -2736,10 +2736,15 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       if (e.message === "RATE_LIMIT") {
         setSearchError("Course search has hit today's request limit — try again within 24 hours, or scan your scorecard below.");
       } else {
-        // API detail load failed — store the basic search result so the
-        // user can scan their physical scorecard to supply hole data.
-        setPreScanCourse({ id: c.id, name: c.name, location: c.location, holes: [], tees: {}, fromApi: true });
-        setSearchError(`Couldn't load full course data for ${c.name} — tap "Scan scorecard" below to add hole data from your physical card, or try again.`);
+        // API detail load failed — build a minimal course object from the
+        // search result data and go to the course detail page anyway.
+        // The user can scan their scorecard there to add full hole data.
+        const fallback = {
+          id: c.id, name: c.name, location: c.location,
+          holes: [], tees: {}, fromApi: true, fromSearch: true,
+        };
+        setCourse(fallback);
+        setStep("course");
       }
     } finally {
       setLoadingCourse(false);
@@ -2943,6 +2948,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     const teeKeys = Object.keys(course.tees || {});
     const hasHoles = course.holes?.length > 0;
     const hasSI = course.holes?.some(h => h.si);
+    const dataIncomplete = course.fromSearch || (!hasHoles && !teeKeys.length);
     return (
       <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
         <div className="page-head">
@@ -2956,38 +2962,52 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           </div>
         </div>
 
-        {/* Course data summary */}
-        <div style={{ margin: "0 18px 18px", background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
-          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>Course Data</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12.5, color: C.steel }}>Holes</span>
-              <span style={{ fontWeight: 700, fontSize: 12.5 }}>{hasHoles ? course.holes.length : "—"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12.5, color: C.steel }}>Stroke Index</span>
-              <span style={{ fontWeight: 700, fontSize: 12.5, color: hasSI ? "#1B7A3D" : "#C8392D" }}>{hasSI ? "Available" : "Not available"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12.5, color: C.steel }}>Tees</span>
-              <span style={{ fontWeight: 700, fontSize: 12.5 }}>{teeKeys.length > 0 ? teeKeys.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(", ") : "—"}</span>
-            </div>
-            {teeKeys.map(t => {
-              const tee = course.tees[t];
-              if (!tee?.rating && !tee?.slope) return null;
-              return (
-                <div key={t} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 12.5, color: C.steel }}>{t.charAt(0).toUpperCase() + t.slice(1)} — Rating / Slope</span>
-                  <span style={{ fontWeight: 700, fontSize: 12.5 }}>{tee.rating ?? "—"} / {tee.slope ?? "—"}</span>
-                </div>
-              );
-            })}
+        {/* Incomplete data notice */}
+        {dataIncomplete && (
+          <div style={{ margin: "0 18px 16px", padding: "12px 14px", background: "#FFF8E7", border: "1px solid #E08A1E", display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 14, flexShrink: 0 }}>⚠️</div>
+            <p style={{ fontSize: 12, color: "#7A4A00", lineHeight: 1.55, margin: 0 }}>
+              Full hole data couldn't be loaded for this course. Scan your physical scorecard below to add stroke index, yardages and tee ratings.
+            </p>
           </div>
-        </div>
+        )}
+
+        {/* Course data summary — only show if we have data */}
+        {!dataIncomplete && (
+          <div style={{ margin: "0 18px 18px", background: C.white, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>Course Data</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12.5, color: C.steel }}>Holes</span>
+                <span style={{ fontWeight: 700, fontSize: 12.5 }}>{course.holes.length}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12.5, color: C.steel }}>Stroke Index</span>
+                <span style={{ fontWeight: 700, fontSize: 12.5, color: hasSI ? "#1B7A3D" : "#C8392D" }}>{hasSI ? "Available" : "Not available"}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12.5, color: C.steel }}>Tees</span>
+                <span style={{ fontWeight: 700, fontSize: 12.5 }}>{teeKeys.length > 0 ? teeKeys.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(", ") : "—"}</span>
+              </div>
+              {teeKeys.map(t => {
+                const tee = course.tees[t];
+                if (!tee?.rating && !tee?.slope) return null;
+                return (
+                  <div key={t} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12.5, color: C.steel }}>{t.charAt(0).toUpperCase() + t.slice(1)} — Rating / Slope</span>
+                    <span style={{ fontWeight: 700, fontSize: 12.5 }}>{tee.rating ?? "—"} / {tee.slope ?? "—"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Scan to improve option */}
         <div style={{ margin: "0 18px 12px" }}>
-          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>Improve Course Data</div>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>
+            {dataIncomplete ? "Add Course Data" : "Improve Course Data"}
+          </div>
           <div
             onClick={() => { setPreScanCourse(course); setStep("scan"); }}
             style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.black, cursor: "pointer" }}
@@ -3008,15 +3028,17 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           <button className="btn btn-outline" onClick={() => setStep("setup")} style={{ marginBottom: 10 }}>
             Continue Without Scanning
           </button>
-          {!hasSI && (
+          {(dataIncomplete || !hasSI) && (
             <div style={{ padding: "10px 14px", background: "#FFF8E7", border: "1px solid #E08A1E", display: "flex", gap: 10, alignItems: "flex-start" }}>
               <div style={{ fontSize: 14, flexShrink: 0 }}>⚠️</div>
               <p style={{ fontSize: 11.5, color: "#7A4A00", lineHeight: 1.55, margin: 0 }}>
-                Without scanning, stroke index won't be available — you'll need to enter it manually hole by hole, and Stableford points may not calculate correctly until you do.
+                {dataIncomplete
+                  ? "Without scanning, hole data won't be available. Stableford points won't calculate correctly and you'll need to enter stroke index manually for each hole."
+                  : "Stroke index isn't available — you'll need to enter it manually hole by hole. Stableford points may not calculate correctly until you do."}
               </p>
             </div>
           )}
-          {hasSI && (
+          {!dataIncomplete && hasSI && (
             <p style={{ fontSize: 11, color: C.ash, lineHeight: 1.5 }}>
               Course data looks complete — scanning is optional but recommended to verify hole data is current.
             </p>
