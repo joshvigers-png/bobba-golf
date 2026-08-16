@@ -2389,31 +2389,40 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
         <div style={{ width: 16, height: 16, color: C.ash }}><Icon.ChevronRight /></div>
       </div>
 
-      {/* Data Migration — only shown if old localStorage data exists */}
+      {/* Data Migration — shown if any old localStorage round data exists */}
       {(() => {
+        // Scan all localStorage keys for any bb_rounds_ data —
+        // the old numeric ID may differ from the new Firebase UID
+        const allKeys = Object.keys(localStorage);
+        const roundKeys = allKeys.filter(k => k.startsWith("bb_rounds_") && k !== `bb_rounds_${user.id}`);
+        const goalKeys = allKeys.filter(k => k.startsWith("bb_goals_") && k !== `bb_goals_${user.id}`);
+        const compKeys = allKeys.filter(k => k.startsWith("bb_comps_") && k !== `bb_comps_${user.id}`);
         const allAccounts = LS.get("bb_accounts") || [];
         const oldAccount = allAccounts.find(a => a.email?.trim().toLowerCase() === user.email?.trim().toLowerCase());
-        const oldRounds = LS.get(`bb_rounds_${oldAccount?.id}`) || [];
-        const hasOldData = oldAccount || oldRounds.length > 0;
+
+        const totalRounds = roundKeys.reduce((s, k) => s + (LS.get(k) || []).length, 0);
+        const hasOldData = roundKeys.length > 0 || goalKeys.length > 0 || compKeys.length > 0 || oldAccount;
+
         if (!hasOldData) return null;
+
         return (
           <>
             <div className="section-head"><span className="section-title">Data Migration</span></div>
             <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>Transfer Your Data</div>
               <div style={{ fontSize: 11.5, color: C.steel, marginTop: 3, lineHeight: 1.5, marginBottom: 14 }}>
-                Your rounds, goals, bag and competition data from the previous version of the app hasn't transferred yet. Tap below to move it across now — this only needs to be done once.
-                {oldRounds.length > 0 && <span style={{ color: "#1B7A3D", fontWeight: 700 }}> Found {oldRounds.length} rounds to transfer.</span>}
+                Your rounds and data from the previous version hasn't transferred yet. Tap below to move it across — this only needs to be done once.
+                {totalRounds > 0 && <span style={{ color: "#1B7A3D", fontWeight: 700 }}> Found {totalRounds} rounds to transfer.</span>}
               </div>
               {migrateStatus === "done" && (
                 <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ width: 16, height: 16, color: "#1B7A3D", flexShrink: 0 }}><Icon.Check /></div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1B7A3D" }}>Data transferred successfully — reload the app to see your rounds.</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1B7A3D" }}>Data transferred — close and reopen the app to see your rounds.</div>
                 </div>
               )}
               {migrateStatus === "error" && (
                 <div style={{ background: "#FFF0EE", border: "1px solid #C8392D", padding: "10px 14px", marginBottom: 12 }}>
-                  <div style={{ fontSize: 12.5, color: "#C8392D" }}>Transfer failed — please try again or contact support.</div>
+                  <div style={{ fontSize: 12.5, color: "#C8392D" }}>Transfer failed — please try again.</div>
                 </div>
               )}
               <button
@@ -2423,8 +2432,31 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
                 onClick={async () => {
                   setMigrateStatus("running");
                   try {
-                    await migrateLocalDataToFirestore(user.id, user.email);
-                    // Also update the user profile with old bag/handicap data if missing
+                    // Migrate rounds from ALL old bb_rounds_ keys
+                    for (const key of roundKeys) {
+                      const rounds = LS.get(key) || [];
+                      for (const round of rounds) {
+                        await DB.setRound(user.id, round);
+                      }
+                      LS.del(key);
+                    }
+                    // Migrate goals
+                    for (const key of goalKeys) {
+                      const goals = LS.get(key) || [];
+                      for (const goal of goals) {
+                        await DB.setGoal(user.id, goal);
+                      }
+                      LS.del(key);
+                    }
+                    // Migrate competitions
+                    for (const key of compKeys) {
+                      const comps = LS.get(key) || [];
+                      for (const comp of comps) {
+                        await DB.setComp(user.id, comp);
+                      }
+                      LS.del(key);
+                    }
+                    // Migrate profile data (bag, handicap) from old account
                     if (oldAccount) {
                       const updates = {};
                       if (!user.bag?.length && oldAccount.bag?.length) updates.bag = oldAccount.bag;
@@ -2435,9 +2467,13 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
                         await DB.setUser(user.id, { ...user, ...updates });
                         onUpdate({ ...user, ...updates });
                       }
+                      // Clean up old account
+                      const remaining = allAccounts.filter(a => a.email?.trim().toLowerCase() !== user.email?.trim().toLowerCase());
+                      remaining.length > 0 ? LS.set("bb_accounts", remaining) : LS.del("bb_accounts");
                     }
                     setMigrateStatus("done");
                   } catch (e) {
+                    console.error("Migration error:", e);
                     setMigrateStatus("error");
                   }
                 }}
