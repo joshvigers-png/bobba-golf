@@ -1773,6 +1773,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const rounds = LS.get(`bb_rounds_${user.id}`) || [];
+  const comps = LS.get(`bb_comps_${user.id}`) || [];
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const modules = [
@@ -1875,7 +1876,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
           <div className="stat-lbl">Clubs</div>
         </div>
         <div className="stat-cell">
-          <div className="stat-val mono">0</div>
+          <div className="stat-val mono">{comps.length}</div>
           <div className="stat-lbl">Events</div>
         </div>
       </div>
