@@ -6276,35 +6276,29 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [sentIds, setSentIds] = useState([]);
+  const [searched, setSearched] = useState(false);
   const [error, setError] = useState("");
 
-  const search = async () => {
+  const doSearch = async () => {
     if (!searchQuery.trim()) return;
-    setSearching(true); setError(""); setResults([]);
+    setSearching(true); setError(""); setResults([]); setSearched(true);
     try {
       let found = [];
       const byUsername = await DB.searchByUsername(searchQuery.trim().toLowerCase().replace("@", ""));
       found = [...byUsername];
       if (searchQuery.includes(".") && searchQuery.includes("@")) {
-        const emailSnap = await getDocs(
-          query(collection(db, "users"), where("email", "==", searchQuery.trim().toLowerCase()))
-        );
-        emailSnap.docs.forEach(d => {
-          if (!found.find(u => u.id === d.id)) found.push({ id: d.id, ...d.data() });
-        });
+        const emailSnap = await getDocs(query(collection(db, "users"), where("email", "==", searchQuery.trim().toLowerCase())));
+        emailSnap.docs.forEach(d => { if (!found.find(u => u.id === d.id)) found.push({ id: d.id, ...d.data() }); });
       }
       const filtered = found.filter(u => u.id !== user.id && !(user.friends || []).includes(u.id));
       setResults(filtered);
-      if (filtered.length === 0) setError("No golfers found. Check the username or email and try again.");
-    } catch (e) {
-      setError("Search failed — please try again.");
-    }
+      if (filtered.length === 0) setError("No golfers found. Try a different username or email.");
+    } catch (e) { setError("Search failed — please try again."); }
     setSearching(false);
   };
 
   const sendRequest = async (toUser) => {
     try {
-      // Add current user's ID to the target's friendRequests array
       const targetProfile = await DB.getUserById(toUser.id);
       const existing = targetProfile?.friendRequests || [];
       if (!existing.includes(user.id)) {
@@ -6315,51 +6309,89 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
   };
 
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" style={{ maxHeight: "88vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
-        <div className="sheet-handle" />
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Find Friends</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            placeholder="Username or email address"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && search()}
-            autoFocus
-          />
-          <button className="btn btn-primary" onClick={search} disabled={searching} style={{ flexShrink: 0, padding: "0 16px" }}>
+    <div style={{ position: "fixed", inset: 0, background: C.paper, zIndex: 200, overflowY: "auto" }}>
+      <div className="page-head">
+        <button onClick={onClose} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">The Lounge</div>
+          <h1>Find Friends</h1>
+          <p>Search by username or email address</p>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 18px 24px" }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+          <div style={{ flex: 1, position: "relative" }}>
+            <input
+              className="input"
+              placeholder="@username or email address"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && doSearch()}
+              style={{ paddingLeft: 40 }}
+              autoFocus
+            />
+            <div style={{ position: "absolute", left: 13, top: 14, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
+          </div>
+          <button className="btn btn-primary" onClick={doSearch} disabled={searching || !searchQuery.trim()} style={{ flexShrink: 0, padding: "0 20px", opacity: !searchQuery.trim() ? 0.5 : 1 }}>
             {searching ? "..." : "Search"}
           </button>
         </div>
-        {error && <p style={{ fontSize: 12.5, color: C.steel, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
-        {results.map(r => (
-          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${C.line}` }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0 }}>
-              {r.name?.charAt(0).toUpperCase()}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 13 }}>{r.name}</div>
-              <div style={{ fontSize: 11, color: C.steel }}>@{r.username}</div>
-              {r.handicap != null && <div style={{ fontSize: 11, color: C.ash }}>HCP {r.handicap?.toFixed(1)}</div>}
-            </div>
-            {(user.friendRequests || []).includes(r.id) ? (
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Sent you a request</span>
-            ) : sentIds.includes(r.id) ? (
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Request sent ✓</span>
-            ) : (
-              <button onClick={() => sendRequest(r)} className="btn btn-outline" style={{ fontSize: 11, padding: "6px 12px" }}>Add</button>
-            )}
+
+        {searching && <p style={{ fontSize: 13, color: C.steel, textAlign: "center", padding: "24px 0" }}>Searching...</p>}
+
+        {!searching && searched && results.length === 0 && (
+          <div className="empty">
+            <div className="empty-icon"><Icon.Users2 /></div>
+            <div className="empty-title">No results</div>
+            <div className="empty-sub">{error || "No golfers found. Try a different username or email."}</div>
           </div>
-        ))}
-        <button className="btn btn-outline" style={{ marginTop: 18 }} onClick={onClose}>Close</button>
+        )}
+
+        {!searching && results.length > 0 && (
+          <>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 12 }}>
+              {results.length} golfer{results.length !== 1 ? "s" : ""} found
+            </div>
+            {results.map(r => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 8 }}>
+                <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 18, color: C.white, flexShrink: 0 }}>
+                  {r.name?.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>{r.name}</div>
+                  <div style={{ fontSize: 12, color: C.steel }}>@{r.username}</div>
+                  {r.handicap != null && <div style={{ fontSize: 11.5, color: C.ash, marginTop: 2 }}>HCP {r.handicap?.toFixed(1)}</div>}
+                </div>
+                {(user.friendRequests || []).includes(r.id) ? (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Sent you a request</span>
+                ) : sentIds.includes(r.id) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div style={{ width: 14, height: 14, color: "#1B7A3D" }}><Icon.Check /></div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Sent</span>
+                  </div>
+                ) : (
+                  <button onClick={() => sendRequest(r)} className="btn btn-primary" style={{ fontSize: 12, padding: "8px 16px", flexShrink: 0 }}>Add</button>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+
+        {!searched && (
+          <div style={{ textAlign: "center", padding: "40px 0" }}>
+            <div style={{ width: 48, height: 48, margin: "0 auto 16px", color: C.ash }}><Icon.Users2 /></div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.steel }}>Find a golfer</div>
+            <div style={{ fontSize: 12, color: C.ash, marginTop: 6, lineHeight: 1.6 }}>Enter a username or email above</div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Friend Requests Sheet ─────────────────────────────────────────────────────
 function FriendRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
   const [processing, setProcessing] = useState({});
 
