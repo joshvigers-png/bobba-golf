@@ -6322,21 +6322,26 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
       </div>
 
       <div style={{ padding: "0 18px 24px" }}>
-        <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
-          <div style={{ flex: 1, position: "relative" }}>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ position: "relative", marginBottom: 10 }}>
             <input
               className="input"
               placeholder="@username or email address"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               onKeyDown={e => e.key === "Enter" && doSearch()}
-              style={{ paddingLeft: 40 }}
+              style={{ paddingLeft: 40, fontSize: 15, padding: "14px 14px 14px 40px" }}
               autoFocus
             />
-            <div style={{ position: "absolute", left: 13, top: 14, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
+            <div style={{ position: "absolute", left: 13, top: 15, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
           </div>
-          <button className="btn btn-primary" onClick={doSearch} disabled={searching || !searchQuery.trim()} style={{ flexShrink: 0, padding: "0 20px", opacity: !searchQuery.trim() ? 0.5 : 1 }}>
-            {searching ? "..." : "Search"}
+          <button
+            className="btn btn-primary"
+            onClick={doSearch}
+            disabled={searching || !searchQuery.trim()}
+            style={{ width: "100%", opacity: !searchQuery.trim() ? 0.5 : 1 }}
+          >
+            {searching ? "Searching..." : "Search"}
           </button>
         </div>
 
