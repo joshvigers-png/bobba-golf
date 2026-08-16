@@ -6212,6 +6212,18 @@ function LoungeScreen({ user, onUpdateUser, onBack }) {
               <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
             </div>
           </a>
+          <a href="https://www.tiktok.com/@bobbagolf" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 18px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 12, cursor: "pointer" }}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M16.6 5.82s.51.5 0 0A4.278 4.278 0 0 1 15.54 3h-3.09v12.4a2.592 2.592 0 0 1-2.59 2.5c-1.42 0-2.6-1.16-2.6-2.6 0-1.72 1.66-3.01 3.37-2.48V9.66c-3.45-.46-6.47 2.22-6.47 5.64 0 3.33 2.76 5.7 5.69 5.7 3.14 0 5.69-2.55 5.69-5.7V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3s-1.88.09-3.24-1.48z"/></svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>@bobbagolf</div>
+                <div style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>Follow us on TikTok</div>
+              </div>
+              <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+            </div>
+          </a>
           <p style={{ fontSize: 11.5, color: C.ash, lineHeight: 1.6, marginTop: 8 }}>
             More social features coming soon — discussions, round sharing and society boards are on the roadmap.
           </p>
