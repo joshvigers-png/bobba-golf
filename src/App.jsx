@@ -2195,6 +2195,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [recalcDone, setRecalcDone] = useState(false);
   const [recalcResult, setRecalcResult] = useState("");
   const [whsInfoOpen, setWhsInfoOpen] = useState(false);
+  const [migrateStatus, setMigrateStatus] = useState(null); // null | running | done | error
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
@@ -2387,6 +2388,66 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
         </div>
         <div style={{ width: 16, height: 16, color: C.ash }}><Icon.ChevronRight /></div>
       </div>
+
+      {/* Data Migration — only shown if old localStorage data exists */}
+      {(() => {
+        const allAccounts = LS.get("bb_accounts") || [];
+        const oldAccount = allAccounts.find(a => a.email?.trim().toLowerCase() === user.email?.trim().toLowerCase());
+        const oldRounds = LS.get(`bb_rounds_${oldAccount?.id}`) || [];
+        const hasOldData = oldAccount || oldRounds.length > 0;
+        if (!hasOldData) return null;
+        return (
+          <>
+            <div className="section-head"><span className="section-title">Data Migration</span></div>
+            <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>Transfer Your Data</div>
+              <div style={{ fontSize: 11.5, color: C.steel, marginTop: 3, lineHeight: 1.5, marginBottom: 14 }}>
+                Your rounds, goals, bag and competition data from the previous version of the app hasn't transferred yet. Tap below to move it across now — this only needs to be done once.
+                {oldRounds.length > 0 && <span style={{ color: "#1B7A3D", fontWeight: 700 }}> Found {oldRounds.length} rounds to transfer.</span>}
+              </div>
+              {migrateStatus === "done" && (
+                <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 16, height: 16, color: "#1B7A3D", flexShrink: 0 }}><Icon.Check /></div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1B7A3D" }}>Data transferred successfully — reload the app to see your rounds.</div>
+                </div>
+              )}
+              {migrateStatus === "error" && (
+                <div style={{ background: "#FFF0EE", border: "1px solid #C8392D", padding: "10px 14px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 12.5, color: "#C8392D" }}>Transfer failed — please try again or contact support.</div>
+                </div>
+              )}
+              <button
+                className="btn btn-primary"
+                disabled={migrateStatus === "running" || migrateStatus === "done"}
+                style={{ opacity: migrateStatus === "running" || migrateStatus === "done" ? 0.6 : 1 }}
+                onClick={async () => {
+                  setMigrateStatus("running");
+                  try {
+                    await migrateLocalDataToFirestore(user.id, user.email);
+                    // Also update the user profile with old bag/handicap data if missing
+                    if (oldAccount) {
+                      const updates = {};
+                      if (!user.bag?.length && oldAccount.bag?.length) updates.bag = oldAccount.bag;
+                      if (user.handicap == null && oldAccount.handicap != null) updates.handicap = oldAccount.handicap;
+                      if (!user.handicapHistory?.length && oldAccount.handicapHistory?.length) updates.handicapHistory = oldAccount.handicapHistory;
+                      if (oldAccount.bagCompleted) updates.bagCompleted = true;
+                      if (Object.keys(updates).length > 0) {
+                        await DB.setUser(user.id, { ...user, ...updates });
+                        onUpdate({ ...user, ...updates });
+                      }
+                    }
+                    setMigrateStatus("done");
+                  } catch (e) {
+                    setMigrateStatus("error");
+                  }
+                }}
+              >
+                {migrateStatus === "running" ? "Transferring…" : migrateStatus === "done" ? "Transferred ✓" : "Transfer My Data"}
+              </button>
+            </div>
+          </>
+        );
+      })()}
 
       <div className="section-head"><span className="section-title">Handicap</span></div>
       <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
