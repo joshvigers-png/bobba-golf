@@ -2702,7 +2702,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       const yds = {};
       teeKeys.forEach(k => { yds[k] = teeHoleSets[k]?.[i]?.yardage ?? null; });
       const sample = teeHoleSets[teeKeys[0]]?.[i];
-      return { n, par: sample?.par ?? 4, si: sample?.handicap ?? n, yds };
+      return { n, par: sample?.par ?? 4, si: sample?.handicap ?? null, yds };
     });
     return {
       id: raw.id, name: buildCourseName(raw),
@@ -2956,6 +2956,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     const hasHoles = course.holes?.length > 0;
     const hasSI = course.holes?.some(h => h.si);
     const dataIncomplete = course.fromSearch || (!hasHoles && !teeKeys.length);
+    const hasBeenScanned = course.fromScan === true;
     return (
       <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
         <div className="page-head">
@@ -3010,42 +3011,55 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           </div>
         )}
 
-        {/* Scan to improve option */}
-        <div style={{ margin: "0 18px 12px" }}>
-          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>
-            {dataIncomplete ? "Add Course Data" : "Improve Course Data"}
-          </div>
-          <div
-            onClick={() => { setPreScanCourse(course); setStep("scan"); }}
-            style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.black, cursor: "pointer" }}
-          >
-            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <div style={{ width: 18, height: 18, color: C.white }}><Icon.ModRound /></div>
+        {/* Scan to improve option — hide if already scanned */}
+        {!hasBeenScanned && (
+          <div style={{ margin: "0 18px 12px" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 10 }}>
+              {dataIncomplete ? "Add Course Data" : "Improve Course Data"}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 13, color: C.white }}>Scan Your Scorecard</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 2 }}>Adds stroke index, yardages and validates hole data</div>
+            <div
+              onClick={() => { setPreScanCourse(course); setStep("scan"); }}
+              style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.black, cursor: "pointer" }}
+            >
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <div style={{ width: 18, height: 18, color: C.white }}><Icon.ModRound /></div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, color: C.white }}>Scan Your Scorecard</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.55)", marginTop: 2 }}>Adds stroke index, yardages and validates hole data</div>
+              </div>
+              <div style={{ width: 14, height: 14, color: "rgba(255,255,255,.4)" }}><Icon.ChevronRight /></div>
             </div>
-            <div style={{ width: 14, height: 14, color: "rgba(255,255,255,.4)" }}><Icon.ChevronRight /></div>
           </div>
-        </div>
+        )}
 
-        {/* Continue without scanning */}
+        {/* Scanned confirmation */}
+        {hasBeenScanned && (
+          <div style={{ margin: "0 18px 12px", padding: "12px 14px", background: "#EDF7F0", border: "1px solid #1B7A3D", display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ width: 18, height: 18, color: "#1B7A3D", flexShrink: 0 }}><Icon.Check /></div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 13, color: "#1B7A3D" }}>Scorecard Scanned</div>
+              <div style={{ fontSize: 11, color: "#1B7A3D", opacity: 0.8, marginTop: 1 }}>Hole data, stroke index and tee ratings updated</div>
+            </div>
+          </div>
+        )}
+
+        {/* Continue button */}
         <div style={{ margin: "0 18px 18px" }}>
-          <button className="btn btn-outline" onClick={() => setStep("setup")} style={{ marginBottom: 10 }}>
-            Continue Without Scanning
+          <button className="btn btn-primary" onClick={() => setStep("setup")} style={{ marginBottom: 10 }}>
+            {hasBeenScanned ? "Continue to Round Setup" : "Continue Without Scanning"}
           </button>
-          {(dataIncomplete || !hasSI) && (
+          {!hasBeenScanned && (dataIncomplete || !hasSI) && (
             <div style={{ padding: "10px 14px", background: "#FFF8E7", border: "1px solid #E08A1E", display: "flex", gap: 10, alignItems: "flex-start" }}>
               <div style={{ fontSize: 14, flexShrink: 0 }}>⚠️</div>
               <p style={{ fontSize: 11.5, color: "#7A4A00", lineHeight: 1.55, margin: 0 }}>
                 {dataIncomplete
                   ? "Without scanning, hole data won't be available. Stableford points won't calculate correctly and you'll need to enter stroke index manually for each hole."
-                  : "Stroke index isn't available — you'll need to enter it manually hole by hole. Stableford points may not calculate correctly until you do."}
+                  : "Stroke index isn't available from the database — you'll need to enter it manually hole by hole. Scan your scorecard to add it automatically."}
               </p>
             </div>
           )}
-          {!dataIncomplete && hasSI && (
+          {!hasBeenScanned && !dataIncomplete && hasSI && (
             <p style={{ fontSize: 11, color: C.ash, lineHeight: 1.5 }}>
               Course data looks complete — scanning is optional but recommended to verify hole data is current.
             </p>
@@ -3265,7 +3279,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       </div>
 
       <div className="page-head" style={{ padding: "20px 22px" }}>
-        <button onClick={() => { LS.del(`bb_active_round_${user.id}`); onBack(); }} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Save & Exit
         </button>
         <h1 style={{ fontSize: 22 }}>{course.name}</h1>
