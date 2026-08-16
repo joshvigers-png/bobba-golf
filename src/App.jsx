@@ -2196,6 +2196,9 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [recalcResult, setRecalcResult] = useState("");
   const [whsInfoOpen, setWhsInfoOpen] = useState(false);
   const [migrateStatus, setMigrateStatus] = useState(null); // null | running | done | error
+  const [showDiag, setShowDiag] = useState(false);
+  const lsKeys = Object.keys(localStorage);
+  const lsDiag = lsKeys.map(k => `${k}: ${(localStorage.getItem(k) || "").slice(0, 80)}`).join("\n");
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
@@ -2389,7 +2392,21 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
         <div style={{ width: 16, height: 16, color: C.ash }}><Icon.ChevronRight /></div>
       </div>
 
-      {/* Data Migration — shown if any old localStorage round data exists */}
+      {/* Diagnostic — temporary, shows all localStorage keys */}
+      <div className="section-head"><span className="section-title">Debug</span></div>
+      <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>localStorage keys ({lsKeys.length} total)</div>
+        <div style={{ fontSize: 10, fontFamily: "monospace", color: C.steel, lineHeight: 1.8, wordBreak: "break-all" }}>
+          {lsKeys.length === 0 ? "No localStorage keys found" : lsKeys.map(k => (
+            <div key={k} style={{ borderBottom: `1px solid ${C.line}`, paddingBottom: 4, marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, color: C.black }}>{k}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: C.steel, marginTop: 8 }}>Firebase UID: {user.id}</div>
+      </div>
+
+      {/* Data Migration */}
       {(() => {
         // Scan all localStorage keys for any bb_rounds_ data —
         // the old numeric ID may differ from the new Firebase UID
