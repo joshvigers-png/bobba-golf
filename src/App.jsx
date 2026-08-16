@@ -2368,7 +2368,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
               </div>
             ))}
             <p style={{ fontSize: 11, color: C.ash, lineHeight: 1.5, marginBottom: 18 }}>
-              A full privacy policy will be published at launch. For questions contact Josh: 07840059402
+              A full privacy policy will be published at launch. For questions contact us at Bobbagolf@gmail.com
             </p>
             <button className="btn btn-primary" onClick={() => setPrivacyOpen(false)}>Close</button>
           </div>
@@ -2397,7 +2397,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
             <div style={{ background: C.cloud, padding: "14px 16px", marginBottom: 18 }}>
               <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Found a bug or have a suggestion?</div>
               <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>
-                Message Josh directly on WhatsApp: <span style={{ fontWeight: 700, color: C.black }}>07840059402</span>
+                Email us at <span style={{ fontWeight: 700, color: C.black }}>Bobbagolf@gmail.com</span>
               </p>
             </div>
             <div style={{ fontSize: 10, color: C.ash, textAlign: "center", marginBottom: 16 }}>Bobba Golf · Beta v1.0</div>
