@@ -2195,10 +2195,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [recalcDone, setRecalcDone] = useState(false);
   const [recalcResult, setRecalcResult] = useState("");
   const [whsInfoOpen, setWhsInfoOpen] = useState(false);
-  const [migrateStatus, setMigrateStatus] = useState(null); // null | running | done | error
-  const [showDiag, setShowDiag] = useState(false);
-  const lsKeys = Object.keys(localStorage);
-  const lsDiag = lsKeys.map(k => `${k}: ${(localStorage.getItem(k) || "").slice(0, 80)}`).join("\n");
+  const [migrateStatus, setMigrateStatus] = useState(null);
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
@@ -2390,20 +2387,6 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
           </div>
         </div>
         <div style={{ width: 16, height: 16, color: C.ash }}><Icon.ChevronRight /></div>
-      </div>
-
-      {/* Diagnostic — temporary, shows all localStorage keys */}
-      <div className="section-head"><span className="section-title">Debug</span></div>
-      <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>localStorage keys ({lsKeys.length} total)</div>
-        <div style={{ fontSize: 10, fontFamily: "monospace", color: C.steel, lineHeight: 1.8, wordBreak: "break-all" }}>
-          {lsKeys.length === 0 ? "No localStorage keys found" : lsKeys.map(k => (
-            <div key={k} style={{ borderBottom: `1px solid ${C.line}`, paddingBottom: 4, marginBottom: 4 }}>
-              <span style={{ fontWeight: 700, color: C.black }}>{k}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize: 10, color: C.steel, marginTop: 8 }}>Firebase UID: {user.id}</div>
       </div>
 
       {/* Data Migration */}
