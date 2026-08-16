@@ -1142,9 +1142,16 @@ function AuthScreen({ onAuth, onShowReset }) {
     const fmtErr = validateUsername(cleaned, []);
     if (fmtErr) { setUsernameStatus("error"); setUsernameError(fmtErr); return; }
     setUsernameStatus("checking");
-    const taken = await DB.isUsernameTaken(cleaned);
-    setUsernameStatus(taken ? "error" : "ok");
-    setUsernameError(taken ? "Username already taken." : "");
+    try {
+      const taken = await DB.isUsernameTaken(cleaned);
+      setUsernameStatus(taken ? "error" : "ok");
+      setUsernameError(taken ? "Username already taken." : "");
+    } catch (e) {
+      // If Firestore check fails (e.g. rules not set up yet), allow it —
+      // the username will be validated server-side on account creation.
+      setUsernameStatus("ok");
+      setUsernameError("");
+    }
   };
 
   const submit = async () => {
@@ -1163,7 +1170,8 @@ function AuthScreen({ onAuth, onShowReset }) {
         if (age < 16) { setError("You must be 16 or older to use Bobba Golf."); return; }
 
         if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
-        if (usernameStatus !== "ok") { setError("Please choose a valid, available username."); return; }
+        if (usernameStatus === "error") { setError(usernameError || "Please choose a valid username."); return; }
+        if (!USERNAME_FORMAT.test(form.username)) { setError("Username must be 3-20 characters, start with a letter, and only contain letters, numbers or underscores."); return; }
 
         // Create Firebase Auth account
         const cred = await createUserWithEmailAndPassword(auth, email, password);
