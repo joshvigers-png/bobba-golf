@@ -2737,9 +2737,12 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       setStep("setup");
     } catch (e) {
       if (e.message === "RATE_LIMIT") {
-        setSearchError("Course search has hit today's request limit — try again within 24 hours, or pick a local course below.");
+        setSearchError("Course search has hit today's request limit — try again within 24 hours, or scan your scorecard below.");
       } else {
-        setSearchError("Couldn't load that course's scorecard — please try again or pick a different course.");
+        // API detail load failed — store the basic search result so the
+        // user can scan their physical scorecard to supply hole data.
+        setPreScanCourse({ id: c.id, name: c.name, location: c.location, holes: [], tees: {}, fromApi: true });
+        setSearchError(`Couldn't load full course data for ${c.name} — tap "Scan scorecard" below to add hole data from your physical card, or try again.`);
       }
     } finally {
       setLoadingCourse(false);
@@ -2894,7 +2897,10 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         </div>
 
         {searchError && (
-          <p style={{ fontSize: 11.5, color: C.steel, textAlign: "center", padding: "0 24px 10px", lineHeight: 1.5 }}>{searchError}</p>
+          <div style={{ margin: "0 18px 14px", padding: "12px 14px", background: "#FFF8E7", border: "1px solid #E08A1E", display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 14, flexShrink: 0 }}>⚠️</div>
+            <p style={{ fontSize: 12, color: "#7A4A00", lineHeight: 1.55, margin: 0 }}>{searchError}</p>
+          </div>
         )}
 
         <div className="section-head" style={{ marginTop: 0 }}>
@@ -2919,8 +2925,8 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
               onClick={(e) => { e.stopPropagation(); setPreScanCourse(c); setStep("scan"); }}
               style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", borderTop: `1px solid ${C.line}`, padding: "10px 0 10px 44px", cursor: "pointer", marginTop: 8, width: "100%" }}
             >
-              <div style={{ width: 12, height: 12, color: C.steel }}><Icon.ModRound /></div>
-              <span style={{ fontSize: 10.5, fontWeight: 700, color: C.steel }}>Scan scorecard to add stroke index & validate data</span>
+              <div style={{ width: 12, height: 12, color: "#1B7A3D" }}><Icon.ModRound /></div>
+              <span style={{ fontSize: 11, fontWeight: 800, color: "#1B7A3D" }}>Scan scorecard to add stroke index & validate data</span>
             </button>
           </div>
         ))}
@@ -2944,19 +2950,19 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         existingCourse={preScanCourse}
         onConfirm={(builtCourse) => {
           if (preScanCourse) {
-            // Merge scanned SI and yardages into the existing API course —
-            // keep the API's rating/slope/location data, enrich with real
-            // hole-level data from the physical scorecard scan.
+            const hasExistingHoles = preScanCourse.holes?.length > 0;
             const merged = {
               ...preScanCourse,
-              holes: preScanCourse.holes.map((h, i) => {
-                const scannedHole = builtCourse.holes.find(sh => sh.n === h.n) || builtCourse.holes[i];
-                return {
-                  ...h,
-                  si: scannedHole?.si ?? h.si,
-                  yds: scannedHole?.yds ? { ...h.yds, ...scannedHole.yds } : h.yds,
-                };
-              }),
+              // If API detail never loaded (holes empty), use scanned holes directly.
+              // Otherwise merge scanned SI/yardages into the existing API hole data.
+              holes: hasExistingHoles
+                ? preScanCourse.holes.map((h, i) => {
+                    const scannedHole = builtCourse.holes.find(sh => sh.n === h.n) || builtCourse.holes[i];
+                    return { ...h, si: scannedHole?.si ?? h.si, yds: scannedHole?.yds ? { ...h.yds, ...scannedHole.yds } : h.yds };
+                  })
+                : builtCourse.holes,
+              // Also take scanned tees if API didn't supply them
+              tees: Object.keys(preScanCourse.tees || {}).length > 0 ? preScanCourse.tees : (builtCourse.tees || {}),
               fromScan: true,
             };
             setCourse(merged);
