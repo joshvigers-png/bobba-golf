@@ -1962,7 +1962,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
     { id: "scorecards",  label: "Play a Round", sub: "Live scoring", icon: <Icon.ModRound />, ready: true },
     { id: "history",     label: "History", sub: "Past scorecards", icon: <Icon.Score />, ready: true },
     { id: "bag",         label: "The Bag", sub: "Your setup", icon: <Icon.ModBag />, ready: true },
-    { id: "community",   label: "The Lounge", sub: "Coming soon", icon: <Icon.ModLounge />, ready: false },
+    { id: "community",   label: "The Lounge", sub: "Friends, chat & looking to play", icon: <Icon.ModLounge />, ready: true },
     { id: "tournaments", label: "Competition Mode", sub: "2-ball, 3-ball, 4-ball games", icon: <Icon.ModTrophy />, ready: true },
     { id: "analysis",    label: "Performance", sub: "Your game, tracked", icon: <Icon.ModPerform />, ready: true },
     { id: "goals",       label: "Goals & Training", sub: "Reach your targets", icon: <Icon.Target />, ready: true },
@@ -1979,8 +1979,13 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
             <h1>{firstName}</h1>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button onClick={() => setNotificationsOpen(true)} style={{ background: C.white, border: `1.5px solid ${C.line}`, width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.black, cursor: "pointer" }}>
+            <button onClick={() => setNotificationsOpen(true)} style={{ background: C.white, border: `1.5px solid ${C.line}`, width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.black, cursor: "pointer", position: "relative" }}>
               <div style={{ width: 18, height: 18 }}><Icon.Bell /></div>
+              {(user.friendRequests || []).length > 0 && (
+                <div style={{ position: "absolute", top: -2, right: -2, width: 16, height: 16, borderRadius: "50%", background: C.red, color: C.white, fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {(user.friendRequests || []).length}
+                </div>
+              )}
             </button>
             <button onClick={onOpenProfile} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", borderRadius: "50%" }}>
               {user.photo ? (
@@ -2088,16 +2093,30 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
 
       {notificationsOpen && (
         <div className="sheet-overlay" onClick={() => setNotificationsOpen(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
             <div className="sheet-handle" />
-            <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-              <div style={{ width: 20, height: 20, color: C.black }}><Icon.Bell /></div>
-            </div>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Notifications</div>
-            <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-              Notifications are still under development. Check back soon — for now, your last-round summary and tips show up right here on Home each time you log in.
-            </p>
-            <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>Got it</button>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Notifications</div>
+            {(user.friendRequests || []).length > 0 ? (
+              <>
+                <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={{ width: 18, height: 18, color: "#1B7A3D", flexShrink: 0 }}><Icon.Users2 /></div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: "#1B7A3D" }}>
+                      {(user.friendRequests || []).length} Friend Request{(user.friendRequests || []).length !== 1 ? "s" : ""}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#1B7A3D", opacity: 0.8 }}>Open The Lounge to accept or decline</div>
+                  </div>
+                </div>
+                <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>View in The Lounge</button>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+                  No new notifications. Friend requests will appear here when someone adds you.
+                </p>
+                <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>Got it</button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -6092,468 +6111,321 @@ function PerformanceScreen({ user, onBack }) {
 function loungeKey(suffix) { return `bb_lounge_${suffix}`; }
 
 function LoungeScreen({ user, onUpdateUser, onBack }) {
-  const [tab, setTab] = useState("friends"); // friends | discuss | play
+  const [tab, setTab] = useState("friends");
   const [searchOpen, setSearchOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
-  const [newTopicOpen, setNewTopicOpen] = useState(false);
-  const [activeTopic, setActiveTopic] = useState(null);
-  const [newPlayOpen, setNewPlayOpen] = useState(false);
+  const [friendProfiles, setFriendProfiles] = useState([]);
+  const [requestProfiles, setRequestProfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const myFriends = user.friends || [];
-  const myRequests = user.friendRequests || [];
+  const friendIds = user.friends || [];
+  const requestIds = user.friendRequests || [];
 
-  // Resolve a friend id to a full profile (checks real accounts, then demo directory)
-  const resolveProfile = (id) => {
-    const acc = LS.get("bb_accounts") || [];
-    return acc.find(a => a.id === id) || DEMO_MEMBERS.find(d => d.id === id) || null;
-  };
+  // Load friend and request profiles from Firestore
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const friends = await Promise.all(friendIds.map(id => DB.getUserById(id)));
+        setFriendProfiles(friends.filter(Boolean));
+        const requests = await Promise.all(requestIds.map(id => DB.getUserById(id)));
+        setRequestProfiles(requests.filter(Boolean));
+      } catch (e) { console.error("Lounge load error:", e); }
+      setLoading(false);
+    };
+    load();
+  }, [user.friends?.join(","), user.friendRequests?.join(",")]);
+
+  const hasPendingRequests = requestIds.length > 0;
 
   return (
-    <div>
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
       <div className="page-head" style={{ paddingBottom: 22 }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
-        <div className="page-head-eyebrow">Connect</div>
-        <h1>The Lounge</h1>
-        <p>Find playing partners, swap tips, arrange rounds</p>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">Connect</div>
+          <h1>The Lounge</h1>
+          <p>Find friends and connect with the Bobba Golf community</p>
+        </div>
       </div>
 
-      <div className="lounge-subnav" style={{ marginTop: 16 }}>
-        <div className={`lounge-subnav-btn ${tab==="friends"?"on":""}`} onClick={() => setTab("friends")}><Icon.Users2/>Friends</div>
-        <div className={`lounge-subnav-btn ${tab==="discuss"?"on":""}`} onClick={() => setTab("discuss")}><Icon.MessageCircle/>Discussions</div>
-        <div className={`lounge-subnav-btn ${tab==="play"?"on":""}`} onClick={() => setTab("play")}><Icon.CalendarPlus/>Looking to Play</div>
+      {/* Tab nav */}
+      <div className="lounge-subnav" style={{ marginTop: 0 }}>
+        <div className={`lounge-subnav-btn ${tab==="friends"?"on":""}`} onClick={() => setTab("friends")}>
+          <Icon.Users2 />Friends
+          {hasPendingRequests && <span style={{ background: C.red, color: C.white, borderRadius: "50%", width: 16, height: 16, fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{requestIds.length}</span>}
+        </div>
+        <div className={`lounge-subnav-btn ${tab==="social"?"on":""}`} onClick={() => setTab("social")}><Icon.ModLounge />Social</div>
       </div>
 
       {tab === "friends" && (
-        <FriendsTab
-          user={user} onUpdateUser={onUpdateUser}
-          myFriends={myFriends} myRequests={myRequests}
-          resolveProfile={resolveProfile}
-          onOpenSearch={() => setSearchOpen(true)}
-          onOpenRequests={() => setRequestsOpen(true)}
-        />
+        <div>
+          {/* Action buttons */}
+          <div style={{ display: "flex", gap: 10, margin: "0 18px 20px" }}>
+            <button className="btn btn-primary" onClick={() => setSearchOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <div style={{ width: 16, height: 16 }}><Icon.Search /></div>
+              Find Friends
+            </button>
+            {hasPendingRequests && (
+              <button className="btn btn-outline" onClick={() => setRequestsOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, position: "relative" }}>
+                <div style={{ width: 16, height: 16 }}><Icon.Bell /></div>
+                Requests
+                <span style={{ background: C.red, color: C.white, borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{requestIds.length}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Friends list */}
+          {loading ? (
+            <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: 24 }}>Loading...</p>
+          ) : friendProfiles.length === 0 ? (
+            <div className="empty">
+              <div className="empty-icon"><Icon.Users2 /></div>
+              <div className="empty-title">No friends yet</div>
+              <div className="empty-sub">Search for golfers by username or email to connect.</div>
+            </div>
+          ) : (
+            <>
+              <div className="section-head"><span className="section-title">{friendProfiles.length} Friend{friendProfiles.length !== 1 ? "s" : ""}</span></div>
+              {friendProfiles.map(friend => (
+                <FriendCard key={friend.id} friend={friend} user={user} onUpdateUser={onUpdateUser} />
+              ))}
+            </>
+          )}
+        </div>
       )}
-      {tab === "discuss" && (
-        <DiscussTab user={user} onOpenTopic={setActiveTopic} onNewTopic={() => setNewTopicOpen(true)} />
-      )}
-      {tab === "play" && (
-        <LookingToPlayTab user={user} onNewPost={() => setNewPlayOpen(true)} resolveProfile={resolveProfile} />
+
+      {tab === "social" && (
+        <div style={{ padding: "0 18px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".07em", color: C.steel, marginBottom: 14 }}>Follow Us</div>
+          <a href="https://www.instagram.com/bobbagolf" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 18px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 12, cursor: "pointer" }}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>@bobbagolf</div>
+                <div style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>Follow us on Instagram</div>
+              </div>
+              <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+            </div>
+          </a>
+          <p style={{ fontSize: 11.5, color: C.ash, lineHeight: 1.6, marginTop: 8 }}>
+            More social features coming soon — discussions, round sharing and society boards are on the roadmap.
+          </p>
+        </div>
       )}
 
       {searchOpen && <FriendSearchSheet user={user} onUpdateUser={onUpdateUser} onClose={() => setSearchOpen(false)} />}
-      {requestsOpen && <FriendRequestsSheet user={user} onUpdateUser={onUpdateUser} resolveProfile={resolveProfile} onClose={() => setRequestsOpen(false)} />}
-      {newTopicOpen && <NewTopicSheet user={user} onClose={() => setNewTopicOpen(false)} />}
-      {activeTopic && <TopicDetailSheet user={user} topic={activeTopic} onClose={() => setActiveTopic(null)} />}
-      {newPlayOpen && <NewPlayPostSheet user={user} onClose={() => setNewPlayOpen(false)} />}
+      {requestsOpen && <FriendRequestsSheet user={user} onUpdateUser={onUpdateUser} profiles={requestProfiles} onClose={() => setRequestsOpen(false)} />}
     </div>
   );
 }
 
-// ─── Friends tab ──────────────────────────────────────────────────────────────
-function FriendsTab({ user, onUpdateUser, myFriends, myRequests, resolveProfile, onOpenSearch, onOpenRequests }) {
-  const profiles = myFriends.map(resolveProfile).filter(Boolean);
+// ─── Friend Card ──────────────────────────────────────────────────────────────
+function FriendCard({ friend, user, onUpdateUser }) {
+  const [removing, setRemoving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const rating = friend.handicap <= 0 ? "Scratch" : friend.handicap <= 10 ? "Competitive" : friend.handicap <= 27 ? "Amateur" : "Rookie";
+  const ratingColor = friend.handicap <= 0 ? "#1B7A3D" : friend.handicap <= 10 ? "#2563EB" : friend.handicap <= 27 ? "#E08A1E" : C.steel;
+
+  const removeFriend = async () => {
+    setRemoving(true);
+    try {
+      await DB.removeFriend(user.id, friend.id);
+      const updated = { ...user, friends: (user.friends || []).filter(id => id !== friend.id) };
+      await DB.setUser(user.id, updated);
+      onUpdateUser(updated);
+    } catch (e) { console.error(e); }
+    setRemoving(false);
+    setShowConfirm(false);
+  };
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 10, margin: "0 18px 18px" }}>
-        <button className="btn btn-primary" onClick={onOpenSearch} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "13px" }}>
-          <div style={{ width: 15, height: 15 }}><Icon.UserPlus /></div> Add Friend
-        </button>
-        <button onClick={onOpenRequests} style={{ position: "relative", border: `1.5px solid ${C.black}`, background: C.white, borderRadius: 1, padding: "0 16px", display: "flex", alignItems: "center", cursor: "pointer" }}>
-          <div style={{ width: 17, height: 17, color: C.black }}><Icon.Mail /></div>
-          {myRequests.length > 0 && (
-            <div style={{ position: "absolute", top: -6, right: -6, background: C.red, color: C.white, borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{myRequests.length}</div>
-          )}
-        </button>
+    <div className="course-row" style={{ alignItems: "flex-start" }}>
+      <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0, marginRight: 12 }}>
+        {friend.name?.charAt(0).toUpperCase()}
       </div>
-
-      <div className="section-head"><span className="section-title">Your Friends</span><span className="section-link">{profiles.length}</span></div>
-      {profiles.length === 0 ? (
-        <div className="empty">
-          <div className="empty-icon"><Icon.Users2 /></div>
-          <div className="empty-title">No friends added yet</div>
-          <div className="empty-sub">Search by username or email to find other golfers and send a friend request.</div>
+      <div style={{ flex: 1 }}>
+        <div className="course-name">{friend.name}</div>
+        <div className="course-loc">@{friend.username}</div>
+        {friend.handicap != null && (
+          <div style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: C.steel }}>HCP {friend.handicap?.toFixed(1)}</span>
+            <span style={{ fontSize: 10, fontWeight: 800, color: ratingColor }}>{rating}</span>
+          </div>
+        )}
+      </div>
+      {showConfirm ? (
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setShowConfirm(false)} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", border: `1px solid ${C.line}`, background: C.white, cursor: "pointer" }}>Cancel</button>
+          <button onClick={removeFriend} disabled={removing} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", border: "none", background: C.red, color: C.white, cursor: "pointer" }}>Remove</button>
         </div>
       ) : (
-        profiles.map(p => {
-          const initials = p.name.split(" ").map(n=>n[0]).slice(0,2).join("").toUpperCase();
-          return (
-            <div key={p.id} className="friend-card">
-              <div className="friend-top">
-                <div className="avatar" style={{ width: 42, height: 42, fontSize: 14 }}>{initials}</div>
-                <div>
-                  <div className="friend-name">{p.name}</div>
-                  <div className="friend-username">@{p.username}</div>
-                </div>
-              </div>
-              <div className="friend-stat-row">
-                <div><div className="friend-stat-val mono">{p.handicap != null ? p.handicap.toFixed(1) : "—"}</div><div className="friend-stat-lbl">Handicap</div></div>
-                <div><div className="friend-stat-val mono">{p.demo ? p.rounds : (LS.get(`bb_rounds_${p.id}`)||[]).length}</div><div className="friend-stat-lbl">Rounds</div></div>
-                <div><div className="friend-stat-val mono">{(p.bag||[]).length}</div><div className="friend-stat-lbl">Clubs</div></div>
-                <div><div className="friend-stat-val mono">{p.demo ? p.events : 0}</div><div className="friend-stat-lbl">Events</div></div>
-              </div>
-            </div>
-          );
-        })
+        <button onClick={() => setShowConfirm(true)} style={{ fontSize: 10, fontWeight: 700, color: C.ash, background: "none", border: `1px solid ${C.line}`, padding: "4px 8px", cursor: "pointer" }}>Remove</button>
       )}
     </div>
   );
 }
 
-// ─── Friend search sheet ──────────────────────────────────────────────────────
+// ─── Friend Search Sheet ───────────────────────────────────────────────────────
 function FriendSearchSheet({ user, onUpdateUser, onClose }) {
-  const [query, setQuery] = useState("");
-  // KNOWN LIMITATION (logged 25 June 2026 — see ROADMAP.md): this only
-  // searches accounts that exist in THIS browser's own localStorage, plus
-  // the seeded DEMO_MEMBERS. There is no shared backend, so a real friend's
-  // account created on their own device/browser will never appear here.
-  // Confirmed real-world: searching a genuine username from another tester's
-  // phone (e.g. "NJH1") correctly returns nothing, because that account was
-  // never written to this device's storage. Fixing this requires a real
-  // shared database — see ROADMAP.md for the deferred plan.
-  const acc = (LS.get("bb_accounts") || []).filter(a => a.id !== user.id);
-  const pool = [...acc, ...DEMO_MEMBERS];
+  const [searchQuery, setSearchQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [sentIds, setSentIds] = useState([]);
+  const [error, setError] = useState("");
 
-  const results = query.trim().length === 0 ? [] : pool.filter(p =>
-    p.username?.toLowerCase().includes(query.toLowerCase()) ||
-    p.email?.toLowerCase().includes(query.toLowerCase()) ||
-    p.name?.toLowerCase().includes(query.toLowerCase())
-  );
-
-  const alreadyFriend = (id) => (user.friends||[]).includes(id);
-  const alreadySent = (id) => {
-    const target = pool.find(p => p.id === id);
-    return target?.friendRequests?.includes(user.id) || (LS.get(loungeKey("sent_"+user.id))||[]).includes(id);
-  };
-
-  const sendRequest = (target) => {
-    // Record outgoing on my side (so UI shows "Sent")
-    const sentKey = loungeKey("sent_"+user.id);
-    const sent = LS.get(sentKey) || [];
-    LS.set(sentKey, [...sent, target.id]);
-
-    if (target.demo) {
-      // Demo accounts auto-accept after a short, simulated delay-free response —
-      // there's no real backend, so we just add each other immediately.
-      const myFriends = [...(user.friends||[]), target.id];
-      onUpdateUser({ ...user, friends: myFriends });
-    } else {
-      // Real account: add a pending request onto their stored profile
-      const allAcc = LS.get("bb_accounts") || [];
-      const updated = allAcc.map(a => a.id === target.id
-        ? { ...a, friendRequests: [...(a.friendRequests||[]), user.id] }
-        : a
-      );
-      LS.set("bb_accounts", updated);
+  const search = async () => {
+    if (!searchQuery.trim()) return;
+    setSearching(true); setError(""); setResults([]);
+    try {
+      let found = [];
+      const byUsername = await DB.searchByUsername(searchQuery.trim().toLowerCase().replace("@", ""));
+      found = [...byUsername];
+      if (searchQuery.includes(".") && searchQuery.includes("@")) {
+        const emailSnap = await getDocs(
+          query(collection(db, "users"), where("email", "==", searchQuery.trim().toLowerCase()))
+        );
+        emailSnap.docs.forEach(d => {
+          if (!found.find(u => u.id === d.id)) found.push({ id: d.id, ...d.data() });
+        });
+      }
+      const filtered = found.filter(u => u.id !== user.id && !(user.friends || []).includes(u.id));
+      setResults(filtered);
+      if (filtered.length === 0) setError("No golfers found. Check the username or email and try again.");
+    } catch (e) {
+      setError("Search failed — please try again.");
     }
+    setSearching(false);
+  };
+
+  const sendRequest = async (toUser) => {
+    try {
+      // Add current user's ID to the target's friendRequests array
+      const targetProfile = await DB.getUserById(toUser.id);
+      const existing = targetProfile?.friendRequests || [];
+      if (!existing.includes(user.id)) {
+        await DB.setUser(toUser.id, { ...targetProfile, friendRequests: [...existing, user.id] });
+      }
+      setSentIds(s => [...s, toUser.id]);
+    } catch (e) { console.error("Send request error:", e); }
   };
 
   return (
     <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()}>
+      <div className="sheet" style={{ maxHeight: "88vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 16 }}>Add a Friend</div>
-        <div className="field" style={{ position: "relative" }}>
-          <input className="input" autoFocus placeholder="Search by name or username…" value={query} onChange={e => setQuery(e.target.value)} style={{ paddingLeft: 38 }} />
-          <div style={{ position: "absolute", left: 13, top: 14, width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
-        </div>
-
-        {query.trim().length === 0 && (
-          <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "20px 10px" }}>Start typing a name or username to search.</p>
-        )}
-        {query.trim().length > 0 && results.length === 0 && (
-          <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "20px 10px" }}>No golfers found matching "{query}".</p>
-        )}
-        {results.map(r => {
-          const initials = r.name.split(" ").map(n=>n[0]).slice(0,2).join("").toUpperCase();
-          const isFriend = alreadyFriend(r.id);
-          const sent = alreadySent(r.id);
-          return (
-            <div key={r.id} className="friend-card" style={{ margin: "0 0 10px" }}>
-              <div className="friend-top" style={{ justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div className="avatar" style={{ width: 40, height: 40, fontSize: 13.5 }}>{initials}</div>
-                  <div>
-                    <div className="friend-name">{r.name}</div>
-                    <div className="friend-username">@{r.username} · HCP {r.handicap != null ? r.handicap.toFixed(1) : "—"}</div>
-                  </div>
-                </div>
-                {isFriend ? (
-                  <span style={{ fontSize: 11, fontWeight: 800, color: C.steel }}>Friends</span>
-                ) : sent ? (
-                  <span style={{ fontSize: 11, fontWeight: 800, color: C.steel }}>Sent</span>
-                ) : (
-                  <button className="request-btn accept" onClick={() => sendRequest(r)}>Add</button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Friend requests sheet ────────────────────────────────────────────────────
-function FriendRequestsSheet({ user, onUpdateUser, resolveProfile, onClose }) {
-  const requests = (user.friendRequests || []).map(resolveProfile).filter(Boolean);
-
-  const respond = (requesterId, accept) => {
-    const remaining = (user.friendRequests||[]).filter(id => id !== requesterId);
-    const updatedFriends = accept ? [...(user.friends||[]), requesterId] : (user.friends||[]);
-    onUpdateUser({ ...user, friendRequests: remaining, friends: updatedFriends });
-
-    // Mirror onto the requester's stored account too, if real (not demo)
-    const allAcc = LS.get("bb_accounts") || [];
-    if (allAcc.some(a => a.id === requesterId)) {
-      const updated = allAcc.map(a => a.id === requesterId && accept
-        ? { ...a, friends: [...(a.friends||[]), user.id] }
-        : a
-      );
-      LS.set("bb_accounts", updated);
-    }
-  };
-
-  return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()}>
-        <div className="sheet-handle" />
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 16 }}>Friend Requests</div>
-        {requests.length === 0 ? (
-          <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "20px 10px" }}>No pending requests.</p>
-        ) : (
-          requests.map(r => {
-            const initials = r.name.split(" ").map(n=>n[0]).slice(0,2).join("").toUpperCase();
-            return (
-              <div key={r.id} className="request-row" style={{ padding: "14px 0" }}>
-                <div className="avatar" style={{ width: 38, height: 38, fontSize: 13 }}>{initials}</div>
-                <div style={{ flex: 1 }}>
-                  <div className="friend-name">{r.name}</div>
-                  <div className="friend-username">@{r.username}</div>
-                </div>
-                <div className="request-actions">
-                  <button className="request-btn decline" onClick={() => respond(r.id, false)}>Decline</button>
-                  <button className="request-btn accept" onClick={() => respond(r.id, true)}>Accept</button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Discussions tab ──────────────────────────────────────────────────────────
-function DiscussTab({ user, onOpenTopic, onNewTopic }) {
-  const topics = LS.get(loungeKey("topics")) || [];
-  const sorted = [...topics].sort((a,b) => b.createdAt - a.createdAt);
-
-  return (
-    <div>
-      <div style={{ margin: "0 18px 18px" }}>
-        <button className="btn btn-primary" onClick={onNewTopic} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          <div style={{ width: 15, height: 15 }}><Icon.Plus /></div> Start a Discussion
-        </button>
-      </div>
-      {sorted.length === 0 ? (
-        <div className="empty">
-          <div className="empty-icon"><Icon.MessageCircle /></div>
-          <div className="empty-title">No discussions yet</div>
-          <div className="empty-sub">Start the first topic — ask about equipment, courses, technique, anything.</div>
-        </div>
-      ) : (
-        sorted.map(t => {
-          const comments = LS.get(loungeKey("comments_"+t.id)) || [];
-          return (
-            <div key={t.id} className="topic-card" onClick={() => onOpenTopic(t)}>
-              <div className="topic-title">{t.title}</div>
-              <div className="topic-meta">{t.authorName} · {new Date(t.createdAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
-              <div className="topic-stat-row">
-                <div className="topic-stat"><Icon.MessageCircle/>{comments.length} comment{comments.length!==1?"s":""}</div>
-              </div>
-            </div>
-          );
-        })
-      )}
-    </div>
-  );
-}
-
-function NewTopicSheet({ user, onClose }) {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-
-  const post = () => {
-    if (!title.trim()) return;
-    const topics = LS.get(loungeKey("topics")) || [];
-    const topic = { id: Date.now(), title: title.trim(), body: body.trim(), authorId: user.id, authorName: user.name, createdAt: Date.now() };
-    LS.set(loungeKey("topics"), [...topics, topic]);
-    onClose();
-  };
-
-  return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()}>
-        <div className="sheet-handle" />
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 18 }}>Start a Discussion</div>
-        <div className="field">
-          <label className="field-label">Topic Title</label>
-          <input className="input" autoFocus placeholder="e.g. Best budget driver for a 18 handicap?" value={title} onChange={e => setTitle(e.target.value)} />
-        </div>
-        <div className="field">
-          <label className="field-label">Details <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>— optional</span></label>
-          <textarea className="composer" placeholder="Add more context for the discussion…" value={body} onChange={e => setBody(e.target.value)} />
-        </div>
-        <button className="btn btn-primary" onClick={post} style={{ opacity: title.trim() ? 1 : 0.5 }} disabled={!title.trim()}>Post Topic</button>
-      </div>
-    </div>
-  );
-}
-
-function TopicDetailSheet({ user, topic, onClose }) {
-  const [comments, setComments] = useState(LS.get(loungeKey("comments_"+topic.id)) || []);
-  const [draft, setDraft] = useState("");
-
-  const sendComment = () => {
-    if (!draft.trim()) return;
-    const next = [...comments, { id: Date.now(), authorId: user.id, authorName: user.name, text: draft.trim(), createdAt: Date.now() }];
-    setComments(next);
-    LS.set(loungeKey("comments_"+topic.id), next);
-    setDraft("");
-  };
-
-  return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", maxHeight: "85vh" }}>
-        <div className="sheet-handle" />
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{topic.title}</div>
-        <div style={{ fontSize: 11.5, color: C.steel, marginBottom: 12 }}>{topic.authorName} · {new Date(topic.createdAt).toLocaleDateString("en-GB",{day:"numeric",month:"long"})}</div>
-        {topic.body && <p style={{ fontSize: 13.5, color: C.charcoal, lineHeight: 1.6, marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.line}` }}>{topic.body}</p>}
-
-        <div style={{ flex: 1, overflowY: "auto", margin: "0 -22px" }}>
-          {comments.length === 0 ? (
-            <p style={{ fontSize: 12.5, color: C.steel, textAlign: "center", padding: "16px 22px" }}>No comments yet — be the first to reply.</p>
-          ) : (
-            comments.map(c => (
-              <div key={c.id} className="comment-row">
-                <div className="avatar" style={{ width: 30, height: 30, fontSize: 11, flexShrink: 0 }}>{c.authorName.split(" ").map(n=>n[0]).slice(0,2).join("").toUpperCase()}</div>
-                <div className="comment-bubble">
-                  <div className="comment-author">{c.authorName}</div>
-                  <div className="comment-text">{c.text}</div>
-                  <div className="comment-time">{new Date(c.createdAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 8, paddingTop: 14, marginTop: 8 }}>
-          <input className="input" placeholder="Write a comment…" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key==="Enter" && sendComment()} style={{ flex: 1 }} />
-          <button onClick={sendComment} style={{ background: C.black, color: C.white, border: "none", borderRadius: 1, width: 46, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            <div style={{ width: 16, height: 16 }}><Icon.Send /></div>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Find Friends</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            placeholder="Username or email address"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search()}
+            autoFocus
+          />
+          <button className="btn btn-primary" onClick={search} disabled={searching} style={{ flexShrink: 0, padding: "0 16px" }}>
+            {searching ? "..." : "Search"}
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Looking to Play tab ──────────────────────────────────────────────────────
-function LookingToPlayTab({ user, onNewPost, resolveProfile }) {
-  const posts = LS.get(loungeKey("playposts")) || [];
-  const sorted = [...posts].sort((a,b) => b.createdAt - a.createdAt);
-
-  return (
-    <div>
-      <div style={{ margin: "0 18px 18px" }}>
-        <button className="btn btn-primary" onClick={onNewPost} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          <div style={{ width: 15, height: 15 }}><Icon.CalendarPlus /></div> Post a Round / Range Session
-        </button>
-      </div>
-      {sorted.length === 0 ? (
-        <div className="empty">
-          <div className="empty-icon"><Icon.CalendarPlus /></div>
-          <div className="empty-title">No one's posted yet</div>
-          <div className="empty-sub">Looking for a playing partner or a range buddy? Post here so other members can see and join you.</div>
-        </div>
-      ) : (
-        sorted.map(p => (
-          <div key={p.id} className="play-post">
-            <div className="play-post-tag">
-              {p.type === "range" ? <Icon.Target/> : <Icon.ModRound/>}
-              {p.type === "range" ? "Range Session" : "Looking to Play"}
+        {error && <p style={{ fontSize: 12.5, color: C.steel, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
+        {results.map(r => (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0 }}>
+              {r.name?.charAt(0).toUpperCase()}
             </div>
-            <div className="play-post-body">{p.body}</div>
-            <div className="play-post-meta">
-              <span style={{ fontSize: 11.5, color: C.steel, fontWeight: 600 }}>{p.authorName} · {new Date(p.when).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span>
-              <span style={{ fontSize: 11.5, color: C.steel }}>{p.location}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>{r.name}</div>
+              <div style={{ fontSize: 11, color: C.steel }}>@{r.username}</div>
+              {r.handicap != null && <div style={{ fontSize: 11, color: C.ash }}>HCP {r.handicap?.toFixed(1)}</div>}
             </div>
+            {(user.friendRequests || []).includes(r.id) ? (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Sent you a request</span>
+            ) : sentIds.includes(r.id) ? (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Request sent ✓</span>
+            ) : (
+              <button onClick={() => sendRequest(r)} className="btn btn-outline" style={{ fontSize: 11, padding: "6px 12px" }}>Add</button>
+            )}
           </div>
-        ))
-      )}
+        ))}
+        <button className="btn btn-outline" style={{ marginTop: 18 }} onClick={onClose}>Close</button>
+      </div>
     </div>
   );
 }
 
-function NewPlayPostSheet({ user, onClose }) {
-  const [type, setType] = useState("round");
-  const [body, setBody] = useState("");
-  const [when, setWhen] = useState(new Date().toISOString().slice(0,10));
-  const [location, setLocation] = useState("");
+// ─── Friend Requests Sheet ─────────────────────────────────────────────────────
+function FriendRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
+  const [processing, setProcessing] = useState({});
 
-  const post = () => {
-    if (!body.trim()) return;
-    const posts = LS.get(loungeKey("playposts")) || [];
-    const entry = { id: Date.now(), type, body: body.trim(), when, location: location.trim(), authorId: user.id, authorName: user.name, createdAt: Date.now() };
-    LS.set(loungeKey("playposts"), [...posts, entry]);
-    onClose();
+  const accept = async (fromUser) => {
+    setProcessing(p => ({ ...p, [fromUser.id]: "accepting" }));
+    try {
+      // Add each other as friends, remove from requests
+      const updatedUser = {
+        ...user,
+        friends: [...(user.friends || []), fromUser.id],
+        friendRequests: (user.friendRequests || []).filter(id => id !== fromUser.id),
+      };
+      await DB.setUser(user.id, updatedUser);
+      // Add current user to the requester's friends
+      const fromProfile = await DB.getUserById(fromUser.id);
+      await DB.setUser(fromUser.id, { ...fromProfile, friends: [...(fromProfile.friends || []), user.id] });
+      onUpdateUser(updatedUser);
+    } catch (e) { console.error(e); }
+    setProcessing(p => ({ ...p, [fromUser.id]: null }));
+  };
+
+  const decline = async (fromUser) => {
+    setProcessing(p => ({ ...p, [fromUser.id]: "declining" }));
+    try {
+      const updatedUser = {
+        ...user,
+        friendRequests: (user.friendRequests || []).filter(id => id !== fromUser.id),
+      };
+      await DB.setUser(user.id, updatedUser);
+      onUpdateUser(updatedUser);
+    } catch (e) { console.error(e); }
+    setProcessing(p => ({ ...p, [fromUser.id]: null }));
   };
 
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 18 }}>Find a Playing Partner</div>
-
-        <div className="field">
-          <label className="field-label">Type</label>
-          <div className="seg">
-            <div className={`seg-btn ${type==="round"?"on":""}`} onClick={() => setType("round")}>Round</div>
-            <div className={`seg-btn ${type==="range"?"on":""}`} onClick={() => setType("range")}>Range</div>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Friend Requests</div>
+        <p style={{ fontSize: 13, color: C.steel, marginBottom: 16 }}>{profiles.length} pending request{profiles.length !== 1 ? "s" : ""}</p>
+        {profiles.length === 0 ? (
+          <p style={{ fontSize: 13, color: C.steel }}>No pending requests.</p>
+        ) : profiles.map(p => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0 }}>
+              {p.name?.charAt(0).toUpperCase()}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+              <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
+              {p.handicap != null && <div style={{ fontSize: 11, color: C.ash }}>HCP {p.handicap?.toFixed(1)}</div>}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => decline(p)} disabled={!!processing[p.id]} style={{ fontSize: 11, fontWeight: 700, padding: "7px 10px", border: `1px solid ${C.line}`, background: C.white, cursor: "pointer" }}>Decline</button>
+              <button onClick={() => accept(p)} disabled={!!processing[p.id]} style={{ fontSize: 11, fontWeight: 700, padding: "7px 12px", border: "none", background: C.black, color: C.white, cursor: "pointer" }}>
+                {processing[p.id] === "accepting" ? "..." : "Accept"}
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div className="field">
-          <label className="field-label">What are you looking for?</label>
-          <textarea className="composer" placeholder={type==="round" ? "e.g. Looking for 2 more for a Saturday morning round, all standards welcome" : "e.g. Heading to the range Thursday evening, happy to share a bay"} value={body} onChange={e => setBody(e.target.value)} />
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <div className="field" style={{ flex: 1 }}>
-            <label className="field-label">Date</label>
-            <input className="input" type="date" value={when} onChange={e => setWhen(e.target.value)} />
-          </div>
-          <div className="field" style={{ flex: 1 }}>
-            <label className="field-label">Location</label>
-            <input className="input" placeholder="e.g. Wentworth" value={location} onChange={e => setLocation(e.target.value)} />
-          </div>
-        </div>
-
-        <button className="btn btn-primary" onClick={post} style={{ opacity: body.trim() ? 1 : 0.5 }} disabled={!body.trim()}>Post</button>
+        ))}
+        <button className="btn btn-outline" style={{ marginTop: 18 }} onClick={onClose}>Close</button>
       </div>
     </div>
   );
 }
 
-// ─── Shared: condensed round summary strip (Course Par, Strokes, Points, +/-, HCP) ──
-// Returns the handicap index played on a specific round, plus a flag
-// indicating whether it was directly recorded or estimated from history.
-// ─── Round Detail View (Layer 2) ─────────────────────────────────────────────
-// Read-only scorecard view shown when tapping a round in History.
-// Displays all hole data in a clean scorecard-style grid.
-// "Edit Round" button at the bottom leads to RoundReviewFlow (Layer 3).
 function RoundDetailView({ user, round, onEdit, onBack }) {
   const course = round.course || COURSE_DB.find(c => c.id === round.courseId);
   const { value: hcpPlayed } = getHcpPlayed(round, user);
