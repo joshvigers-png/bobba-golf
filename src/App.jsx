@@ -1239,10 +1239,7 @@ function AuthScreen({ onAuth, onShowReset }) {
 
         if (!profileSaved) {
           try { await deleteUser(cred.user); } catch { /* best effort cleanup */ }
-          // TEMP DEBUG: showing the raw error so we can diagnose on-device
-          // without needing a Mac/dev tools. Remove once root cause is found.
-          const debugDetail = lastErr ? ` [debug: ${lastErr.code || "no-code"} — ${lastErr.message || "no-message"}]` : "";
-          setError("Something went wrong finishing your signup. Please try again — this email is free to use again." + debugDetail);
+          setError("Something went wrong finishing your signup. Please try again — this email is free to use again.");
           return;
         }
 
@@ -1254,7 +1251,13 @@ function AuthScreen({ onAuth, onShowReset }) {
         // Migrate all existing localStorage data (rounds, goals, comps etc)
         // into Firestore under the new Firebase UID — this preserves all
         // data from the old localStorage-based system transparently.
-        await migrateLocalDataToFirestore(uid, email);
+        // Migrate old localStorage data into Firestore — restricted to the
+        // one real account that actually has legacy local data to bring
+        // across. Every other signup is a genuinely fresh account with
+        // nothing to migrate, so we skip this step entirely for them.
+        if (email === "joshvigers@icloud.com") {
+          await migrateLocalDataToFirestore(uid, email);
+        }
 
         onAuth(profile);
       } else {
