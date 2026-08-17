@@ -172,6 +172,31 @@ const DB = {
       try { await deleteDoc(doc(db, "usernames", oldUsername.toLowerCase())); } catch { /* best effort */ }
     }
   },
+  // Friends
+  getUserById: async (uid) => {
+    const snap = await getDoc(doc(db, "users", uid));
+    return snap.exists() ? { id: uid, ...snap.data() } : null;
+  },
+  removeFriend: async (uid, friendId) => {
+    // Removes `uid` from the OTHER side of the friendship — the caller is
+    // responsible for updating their own friends list separately, since
+    // they already have their current profile in hand.
+    const friendProfile = await DB.getUserById(friendId);
+    if (friendProfile) {
+      const updatedFriends = (friendProfile.friends || []).filter(id => id !== uid);
+      await DB.setUser(friendId, { friends: updatedFriends });
+    }
+  },
+  // "Starts with" search on username (usernames are always stored
+  // lowercase, so the query string is lowercased to match). This is a
+  // standard Firestore range-query pattern for prefix search.
+  searchByUsername: async (queryStr) => {
+    const q = queryStr.toLowerCase();
+    if (!q) return [];
+    const qy = query(collection(db, "users"), where("username", ">=", q), where("username", "<=", q + "\uf8ff"));
+    const snap = await getDocs(qy);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
 };
 
 // ─── Firestore sync helpers ──────────────────────────────────────────────────
@@ -202,12 +227,17 @@ async function syncListToFirestore(uid, oldList, newList, setFn, deleteFn) {
 
 function syncRounds(uid, oldRounds, newRounds) {
   syncListToFirestore(uid, oldRounds, newRounds, DB.setRound, DB.deleteRound);
+  // Keep a headline count on the profile itself — this is what lets a
+  // friend see "12 rounds" without needing read access to the actual
+  // rounds subcollection, which stays private to the account owner.
+  DB.updateUser(uid, { roundsCount: newRounds.length }).catch(() => {});
 }
 function syncGoals(uid, oldGoals, newGoals) {
   syncListToFirestore(uid, oldGoals, newGoals, DB.setGoal, DB.deleteGoal);
 }
 function syncComps(uid, oldComps, newComps) {
   syncListToFirestore(uid, oldComps, newComps, DB.setComp, DB.deleteComp);
+  DB.updateUser(uid, { compsCount: newComps.length }).catch(() => {});
 }
 function syncActiveRound(uid, round) {
   DB.setActiveRound(uid, round).catch(err => console.error("[Firestore sync] active round failed:", err));
@@ -232,6 +262,9 @@ async function loadUserDataIntoCache(uid) {
     LS.set(`bb_comps_${uid}`, comps);
     if (activeRound) LS.set(`bb_active_round_${uid}`, activeRound);
     else LS.del(`bb_active_round_${uid}`);
+    // Self-heal the headline counts on every login, in case they ever drift
+    // out of sync with the real subcollections for any reason.
+    DB.updateUser(uid, { roundsCount: rounds.length, compsCount: comps.length }).catch(() => {});
   } catch (err) {
     // If this fails (e.g. offline), fall back to whatever's already cached
     // locally rather than blocking login entirely.
