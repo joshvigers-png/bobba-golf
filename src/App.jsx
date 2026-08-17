@@ -1516,14 +1516,12 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
                   <p style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.5, marginBottom: 8 }}>
                     We sent a link to <b>{verifiedEmail}</b>. Tap it, then come back and check below.
                   </p>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button type="button" className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12.5, flex: 1 }} onClick={checkEmailVerified} disabled={verifyStage === "checking"}>
-                      {verifyStage === "checking" ? "Checking…" : "I've Verified — Check Now"}
-                    </button>
-                    <button type="button" className="btn btn-outline" style={{ padding: "9px 14px", fontSize: 12.5, flex: "0 0 auto" }} onClick={resendVerification} disabled={resendCooldown > 0}>
-                      {resendCooldown > 0 ? `Resend (${resendCooldown}s)` : "Resend"}
-                    </button>
-                  </div>
+                  <button type="button" className="btn btn-primary" style={{ padding: "10px 14px", fontSize: 12.5, width: "100%", marginBottom: 8 }} onClick={checkEmailVerified} disabled={verifyStage === "checking"}>
+                    {verifyStage === "checking" ? "Checking…" : "I've Verified — Check Now"}
+                  </button>
+                  <button type="button" className="btn btn-outline" style={{ padding: "10px 14px", fontSize: 12.5, width: "100%" }} onClick={resendVerification} disabled={resendCooldown > 0}>
+                    {resendCooldown > 0 ? `Resend Email (${resendCooldown}s)` : "Resend Email"}
+                  </button>
                 </div>
               )}
               {mode === "signup" && verifyStage === "verified" && (
