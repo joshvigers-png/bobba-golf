@@ -2572,13 +2572,13 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const modules = [
-    { id: "scorecards",  label: "Play a Round", sub: "Live scoring", icon: <Icon.ModRound />, ready: true },
-    { id: "history",     label: "History", sub: "Past scorecards", icon: <Icon.Score />, ready: true },
     { id: "bag",         label: "The Bag", sub: "Your setup", icon: <Icon.ModBag />, ready: true },
-    { id: "community",   label: "The Lounge", sub: "Friends, chat & looking to play", icon: <Icon.ModLounge />, ready: true },
-    { id: "tournaments", label: "Competition Mode", sub: "2-ball, 3-ball, 4-ball games", icon: <Icon.ModTrophy />, ready: true },
+    { id: "scorecards",  label: "Play a Round", sub: "Live scoring", icon: <Icon.ModRound />, ready: true },
     { id: "analysis",    label: "Performance", sub: "Your game, tracked", icon: <Icon.ModPerform />, ready: true },
+    { id: "history",     label: "History", sub: "Past scorecards", icon: <Icon.Score />, ready: true },
+    { id: "tournaments", label: "Competition Mode", sub: "2-ball, 3-ball, 4-ball games", icon: <Icon.ModTrophy />, ready: true },
     { id: "goals",       label: "Goals & Training", sub: "Reach your targets", icon: <Icon.Target />, ready: true },
+    { id: "community",   label: "The Lounge", sub: "Friends, chat & looking to play", icon: <Icon.ModLounge />, ready: true },
     { id: "store",       label: "Apparel", sub: "Coming soon", icon: <Icon.ModApparel />, ready: false },
   ];
 
