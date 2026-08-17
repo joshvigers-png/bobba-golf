@@ -907,6 +907,7 @@ const Icon = {
   Trophy:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5C3 9.5 4.5 11 7 11M17 6h2.5A1.5 1.5 0 0 1 21 7.5c0 2-1.5 3.5-4 3.5"/><path d="M9 20h6M12 15v5"/></svg>,
   ChevronRight:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6"/></svg>,
   Plus:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>,
+  Clock:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>,
   Bag:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M8 7V5a4 4 0 0 1 8 0v2"/><rect x="4" y="7" width="16" height="14" rx="2"/></svg>,
   Bell:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M9.5 20a2.5 2.5 0 0 0 5 0"/></svg>,
   Search:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.3-4.3"/></svg>,
@@ -1349,6 +1350,7 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
           bagCompleted: false,
           friends: [],
           friendRequests: [],
+          sentRequests: [],
           joined: Date.now(),
         };
 
@@ -1750,6 +1752,7 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
       bagCompleted: false,
       friends: [],
       friendRequests: [],
+      sentRequests: [],
       joined: Date.now(),
     };
     let saved = false;
@@ -6661,14 +6664,17 @@ function LoungeScreen({ user, onUpdateUser, onBack }) {
   const [tab, setTab] = useState("friends");
   const [searchOpen, setSearchOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
   const [friendProfiles, setFriendProfiles] = useState([]);
   const [requestProfiles, setRequestProfiles] = useState([]);
+  const [pendingProfiles, setPendingProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const friendIds = user.friends || [];
   const requestIds = user.friendRequests || [];
+  const sentIds = user.sentRequests || [];
 
-  // Load friend and request profiles from Firestore
+  // Load friend, incoming request, and outgoing (pending) request profiles
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -6677,13 +6683,16 @@ function LoungeScreen({ user, onUpdateUser, onBack }) {
         setFriendProfiles(friends.filter(Boolean));
         const requests = await Promise.all(requestIds.map(id => DB.getUserById(id)));
         setRequestProfiles(requests.filter(Boolean));
+        const pending = await Promise.all(sentIds.map(id => DB.getUserById(id)));
+        setPendingProfiles(pending.filter(Boolean));
       } catch (e) { console.error("Lounge load error:", e); }
       setLoading(false);
     };
     load();
-  }, [user.friends?.join(","), user.friendRequests?.join(",")]);
+  }, [user.friends?.join(","), user.friendRequests?.join(","), user.sentRequests?.join(",")]);
 
   const hasPendingRequests = requestIds.length > 0;
+  const hasSentRequests = sentIds.length > 0;
 
   return (
     <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
@@ -6710,16 +6719,22 @@ function LoungeScreen({ user, onUpdateUser, onBack }) {
       {tab === "friends" && (
         <div>
           {/* Action buttons */}
-          <div style={{ display: "flex", gap: 10, margin: "0 18px 20px" }}>
-            <button className="btn btn-primary" onClick={() => setSearchOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <div style={{ display: "flex", gap: 10, margin: "0 18px 20px", flexWrap: "wrap" }}>
+            <button className="btn btn-primary" onClick={() => setSearchOpen(true)} style={{ flex: 1, minWidth: 140, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
               <div style={{ width: 16, height: 16 }}><Icon.Search /></div>
               Find Friends
             </button>
             {hasPendingRequests && (
-              <button className="btn btn-outline" onClick={() => setRequestsOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, position: "relative" }}>
+              <button className="btn btn-outline" onClick={() => setRequestsOpen(true)} style={{ flex: 1, minWidth: 140, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, position: "relative" }}>
                 <div style={{ width: 16, height: 16 }}><Icon.Bell /></div>
                 Requests
                 <span style={{ background: C.red, color: C.white, borderRadius: "50%", width: 18, height: 18, fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{requestIds.length}</span>
+              </button>
+            )}
+            {hasSentRequests && (
+              <button className="btn btn-outline" onClick={() => setPendingOpen(true)} style={{ flex: 1, minWidth: 140, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <div style={{ width: 16, height: 16 }}><Icon.Clock /></div>
+                Pending ({sentIds.length})
               </button>
             )}
           </div>
@@ -6779,6 +6794,7 @@ function LoungeScreen({ user, onUpdateUser, onBack }) {
 
       {searchOpen && <FriendSearchSheet user={user} onUpdateUser={onUpdateUser} onClose={() => setSearchOpen(false)} />}
       {requestsOpen && <FriendRequestsSheet user={user} onUpdateUser={onUpdateUser} profiles={requestProfiles} onClose={() => setRequestsOpen(false)} />}
+      {pendingOpen && <PendingRequestsSheet user={user} onUpdateUser={onUpdateUser} profiles={pendingProfiles} onClose={() => setPendingOpen(false)} />}
     </div>
   );
 }
@@ -6856,15 +6872,29 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
     setSearching(false);
   };
 
+  const [sendError, setSendError] = useState("");
   const sendRequest = async (toUser) => {
+    setSendError("");
     try {
       const targetProfile = await DB.getUserById(toUser.id);
       const existing = targetProfile?.friendRequests || [];
       if (!existing.includes(user.id)) {
-        await DB.setUser(toUser.id, { ...targetProfile, friendRequests: [...existing, user.id] });
+        await DB.setUser(toUser.id, { friendRequests: [...existing, user.id] });
+      }
+      // Track it as pending on our own profile too, so it's visible in the
+      // Pending tab and survives leaving this screen — not just remembered
+      // locally until the search sheet closes.
+      const ownSent = user.sentRequests || [];
+      if (!ownSent.includes(toUser.id)) {
+        const updated = { ...user, sentRequests: [...ownSent, toUser.id] };
+        await DB.setUser(user.id, { sentRequests: updated.sentRequests });
+        onUpdateUser(updated);
       }
       setSentIds(s => [...s, toUser.id]);
-    } catch (e) { console.error("Send request error:", e); }
+    } catch (e) {
+      console.error("Send request error:", e);
+      setSendError("Couldn't send that request. Please try again.");
+    }
   };
 
   return (
@@ -6904,6 +6934,10 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
           </button>
         </div>
 
+        {sendError && (
+          <p style={{ fontSize: 12.5, color: C.red, textAlign: "center", padding: "8px 0 16px" }}>{sendError}</p>
+        )}
+
         {searching && <p style={{ fontSize: 13, color: C.steel, textAlign: "center", padding: "24px 0" }}>Searching...</p>}
 
         {!searching && searched && results.length === 0 && (
@@ -6930,14 +6964,20 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
                   {r.handicap != null && <div style={{ fontSize: 11.5, color: C.ash, marginTop: 2 }}>HCP {r.handicap?.toFixed(1)}</div>}
                 </div>
                 {(user.friendRequests || []).includes(r.id) ? (
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Sent you a request</span>
-                ) : sentIds.includes(r.id) ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D", flexShrink: 0 }}>Sent you a request</span>
+                ) : sentIds.includes(r.id) || (user.sentRequests || []).includes(r.id) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                     <div style={{ width: 14, height: 14, color: "#1B7A3D" }}><Icon.Check /></div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Sent</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D" }}>Pending</span>
                   </div>
                 ) : (
-                  <button onClick={() => sendRequest(r)} className="btn btn-primary" style={{ fontSize: 12, padding: "8px 16px", flexShrink: 0 }}>Add</button>
+                  <button
+                    onClick={() => sendRequest(r)}
+                    aria-label="Add friend"
+                    style={{ width: 34, height: 34, borderRadius: "50%", border: `1.5px solid ${C.black}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, padding: 0 }}
+                  >
+                    <div style={{ width: 16, height: 16, color: C.black }}><Icon.Plus /></div>
+                  </button>
                 )}
               </div>
             ))}
@@ -6968,10 +7008,14 @@ function FriendRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
         friends: [...(user.friends || []), fromUser.id],
         friendRequests: (user.friendRequests || []).filter(id => id !== fromUser.id),
       };
-      await DB.setUser(user.id, updatedUser);
-      // Add current user to the requester's friends
+      await DB.setUser(user.id, { friends: updatedUser.friends, friendRequests: updatedUser.friendRequests });
+      // Add current user to the requester's friends, and clear it from
+      // their pending "sent" list now that it's been accepted.
       const fromProfile = await DB.getUserById(fromUser.id);
-      await DB.setUser(fromUser.id, { ...fromProfile, friends: [...(fromProfile.friends || []), user.id] });
+      await DB.setUser(fromUser.id, {
+        friends: [...(fromProfile?.friends || []), user.id],
+        sentRequests: (fromProfile?.sentRequests || []).filter(id => id !== user.id),
+      });
       onUpdateUser(updatedUser);
     } catch (e) { console.error(e); }
     setProcessing(p => ({ ...p, [fromUser.id]: null }));
@@ -6984,7 +7028,13 @@ function FriendRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
         ...user,
         friendRequests: (user.friendRequests || []).filter(id => id !== fromUser.id),
       };
-      await DB.setUser(user.id, updatedUser);
+      await DB.setUser(user.id, { friendRequests: updatedUser.friendRequests });
+      // Clear it from the sender's pending "sent" list too, so it
+      // disappears from their Pending tab rather than looking stuck.
+      try {
+        const fromProfile = await DB.getUserById(fromUser.id);
+        await DB.setUser(fromUser.id, { sentRequests: (fromProfile?.sentRequests || []).filter(id => id !== user.id) });
+      } catch { /* best effort — their own list will self-heal next load */ }
       onUpdateUser(updatedUser);
     } catch (e) { console.error(e); }
     setProcessing(p => ({ ...p, [fromUser.id]: null }));
@@ -7014,6 +7064,57 @@ function FriendRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
                 {processing[p.id] === "accepting" ? "..." : "Accept"}
               </button>
             </div>
+          </div>
+        ))}
+        <button className="btn btn-outline" style={{ marginTop: 18 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Pending (sent) requests — outgoing requests awaiting the other
+// person's response. Cancelling here removes it from both sides; once the
+// other person accepts, this list clears automatically on the next load.
+function PendingRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
+  const [processing, setProcessing] = useState({});
+
+  const cancel = async (toUser) => {
+    setProcessing(p => ({ ...p, [toUser.id]: true }));
+    try {
+      const updatedUser = {
+        ...user,
+        sentRequests: (user.sentRequests || []).filter(id => id !== toUser.id),
+      };
+      await DB.setUser(user.id, { sentRequests: updatedUser.sentRequests });
+      // Remove it from the other person's incoming requests too
+      const toProfile = await DB.getUserById(toUser.id);
+      await DB.setUser(toUser.id, { friendRequests: (toProfile?.friendRequests || []).filter(id => id !== user.id) });
+      onUpdateUser(updatedUser);
+    } catch (e) { console.error(e); }
+    setProcessing(p => ({ ...p, [toUser.id]: false }));
+  };
+
+  return (
+    <div className="sheet-overlay" onClick={onClose}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Pending Requests</div>
+        <p style={{ fontSize: 13, color: C.steel, marginBottom: 16 }}>{profiles.length} request{profiles.length !== 1 ? "s" : ""} awaiting a response</p>
+        {profiles.length === 0 ? (
+          <p style={{ fontSize: 13, color: C.steel }}>No pending requests.</p>
+        ) : profiles.map(p => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0 }}>
+              {p.name?.charAt(0).toUpperCase()}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+              <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
+              {p.handicap != null && <div style={{ fontSize: 11, color: C.ash }}>HCP {p.handicap?.toFixed(1)}</div>}
+            </div>
+            <button onClick={() => cancel(p)} disabled={!!processing[p.id]} style={{ fontSize: 11, fontWeight: 700, padding: "7px 10px", border: `1px solid ${C.line}`, background: C.white, cursor: "pointer" }}>
+              {processing[p.id] ? "..." : "Cancel"}
+            </button>
           </div>
         ))}
         <button className="btn btn-outline" style={{ marginTop: 18 }} onClick={onClose}>Close</button>
