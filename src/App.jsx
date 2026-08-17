@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import {
-  getAuth,
+  initializeAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -36,7 +40,16 @@ const firebaseConfig = {
   measurementId: "G-SF8VRTLZN3",
 };
 const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
+// Use initializeAuth with a persistence fallback chain instead of the default
+// getAuth(). This matters specifically for iOS "Add to Home Screen"/standalone
+// contexts (and Safari private browsing), where IndexedDB storage can be
+// unreliable — the default getAuth() can silently end up with a broken/stale
+// auth session in that environment, which is what was causing signup to
+// succeed at the Auth layer but fail with "permission-denied" on the very
+// next Firestore write, only on that specific device/mode.
+const auth = initializeAuth(firebaseApp, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+});
 const db = getFirestore(firebaseApp);
 
 // ─── One-time localStorage → Firestore migration ─────────────────────────────
@@ -1226,10 +1239,7 @@ function AuthScreen({ onAuth, onShowReset }) {
 
         if (!profileSaved) {
           try { await deleteUser(cred.user); } catch { /* best effort cleanup */ }
-          // TEMP DEBUG: showing the raw error so we can diagnose on-device
-          // without needing a Mac/dev tools. Remove once root cause is found.
-          const debugDetail = lastErr ? ` [debug: ${lastErr.code || "no-code"} — ${lastErr.message || "no-message"}]` : "";
-          setError("Something went wrong finishing your signup. Please try again — this email is free to use again." + debugDetail);
+          setError("Something went wrong finishing your signup. Please try again — this email is free to use again.");
           return;
         }
 
