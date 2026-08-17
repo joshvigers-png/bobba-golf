@@ -144,11 +144,33 @@ const DB = {
   clearActiveRound: async (uid) => {
     await deleteDoc(doc(db, "users", uid, "meta", "activeRound"));
   },
-  // Username uniqueness check
-  isUsernameTaken: async (username) => {
-    const q = query(collection(db, "users"), where("username", "==", username.toLowerCase()));
-    const snap = await getDocs(q);
-    return !snap.empty;
+  // Username uniqueness — backed by a small public "usernames" lookup
+  // collection (doc ID = lowercase username, containing just the owner's
+  // uid) rather than querying the protected "users" collection directly.
+  // This is what lets availability checks work correctly even before
+  // someone has signed in — Firestore rules allow public READ of this
+  // collection specifically, while writes stay locked to the account owner.
+  isUsernameTaken: async (username, ownUid = null) => {
+    const snap = await getDoc(doc(db, "usernames", username.toLowerCase()));
+    if (!snap.exists()) return false;
+    if (ownUid && snap.data()?.uid === ownUid) return false; // it's already theirs
+    return true;
+  },
+  claimUsername: async (uid, username) => {
+    await setDoc(doc(db, "usernames", username.toLowerCase()), { uid });
+  },
+  releaseUsername: async (username) => {
+    try { await deleteDoc(doc(db, "usernames", username.toLowerCase())); } catch { /* best effort */ }
+  },
+  // Renames the claim in one step — releases the old one only after the new
+  // one is successfully claimed, so a failure partway through never leaves
+  // the username completely unclaimed.
+  renameUsername: async (uid, oldUsername, newUsername) => {
+    if (oldUsername?.toLowerCase() === newUsername?.toLowerCase()) return;
+    await setDoc(doc(db, "usernames", newUsername.toLowerCase()), { uid });
+    if (oldUsername) {
+      try { await deleteDoc(doc(db, "usernames", oldUsername.toLowerCase())); } catch { /* best effort */ }
+    }
   },
 };
 
@@ -989,6 +1011,12 @@ function SetUsernameScreen({ user, onSaved }) {
         return;
       }
     } catch { /* proceed — already checked live above */ }
+    try {
+      await DB.claimUsername(user.id, username);
+    } catch {
+      setStatus("error"); setError("Couldn't save your username right now. Please try again.");
+      return;
+    }
     onSaved({ ...user, username });
   };
 
@@ -1338,6 +1366,32 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
           return;
         }
 
+        // Claim the username in the public registry — we already confirmed
+        // it was free moments ago, so a failure here is almost always a
+        // connection blip, not a real collision. Retry, then roll back the
+        // whole account if it still won't go through, rather than leaving a
+        // profile whose username was never actually claimed.
+        let usernameClaimed = false;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            await DB.claimUsername(uid, profile.username);
+            usernameClaimed = true;
+            break;
+          } catch {
+            if (attempt < 3) await new Promise(res => setTimeout(res, 500 * (attempt + 1)));
+          }
+        }
+        if (!usernameClaimed) {
+          try { await DB.deleteUser(uid); } catch { /* best effort cleanup */ }
+          try { await deleteUser(cred.user); } catch { /* best effort cleanup */ }
+          setError("Something went wrong finishing your signup. Please try again — this email is free to use again.");
+          setVerifyStage("idle");
+          setVerifiedCred(null);
+          setVerifiedEmail("");
+          onSignupFlowChange?.(false);
+          return;
+        }
+
         onSignupFlowChange?.(false);
         onAuth(profile);
       } else {
@@ -1649,6 +1703,23 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
 
     setLoading(true);
     const uid = firebaseUser.uid;
+
+    // Final authoritative check — now that we're authenticated this can
+    // actually reach Firestore for real.
+    try {
+      const taken = await DB.isUsernameTaken(form.username, uid);
+      if (taken) {
+        setLoading(false);
+        setUsernameStatus("error"); setUsernameError("That username is already taken.");
+        setError("That username is already taken. Please choose another.");
+        return;
+      }
+    } catch {
+      setLoading(false);
+      setError("Couldn't confirm your username is available. Please try again.");
+      return;
+    }
+
     const profile = {
       id: uid,
       name: form.name,
@@ -1673,8 +1744,28 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
         if (attempt < 5) await new Promise(res => setTimeout(res, 700 * (attempt + 1)));
       }
     }
+    if (!saved) {
+      setLoading(false);
+      setError("Something went wrong. Please try again.");
+      return;
+    }
+
+    let claimed = false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        await DB.claimUsername(uid, profile.username);
+        claimed = true;
+        break;
+      } catch {
+        if (attempt < 3) await new Promise(res => setTimeout(res, 500 * (attempt + 1)));
+      }
+    }
     setLoading(false);
-    if (!saved) { setError("Something went wrong. Please try again."); return; }
+    if (!claimed) {
+      try { await DB.deleteUser(uid); } catch { /* best effort cleanup */ }
+      setError("Something went wrong. Please try again.");
+      return;
+    }
     onSaved(profile);
   };
 
@@ -1849,6 +1940,7 @@ export default function App() {
         ...goals.map(g => DB.deleteGoal(uid, g.id)),
         ...comps.map(c => DB.deleteComp(uid, c.id)),
         DB.clearActiveRound(uid),
+        user.username ? DB.releaseUsername(user.username) : Promise.resolve(),
       ]);
       await DB.deleteUser(uid);
     } catch (err) {
@@ -2736,7 +2828,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
     }
     setUsernameStatus("checking");
     try {
-      const taken = await DB.isUsernameTaken(cleaned);
+      const taken = await DB.isUsernameTaken(cleaned, user.id);
       if (taken) { setUsernameStatus("error"); setUsernameError("That username is already taken."); }
       else { setUsernameStatus("ok"); setUsernameError(""); }
     } catch {
@@ -2748,7 +2840,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
     // Re-validate the username one last time before saving, same as signup
     if (form.username !== user.username) {
       try {
-        const taken = await DB.isUsernameTaken(form.username);
+        const taken = await DB.isUsernameTaken(form.username, user.id);
         if (taken) { setUsernameStatus("error"); setUsernameError("That username is already taken."); return; }
       } catch { /* proceed — already checked live above */ }
     }
@@ -2763,6 +2855,18 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
     // accidentally cleared while editing something else), keep the existing
     // value rather than silently wiping it to null.
     const handicap = form.handicap.trim() ? parseFloat(form.handicap) : (user.handicap ?? null);
+
+    // Keep the public username registry in sync if it changed
+    if (form.username !== user.username) {
+      try {
+        await DB.renameUsername(user.id, user.username, form.username);
+      } catch {
+        setUsernameStatus("error");
+        setUsernameError("Couldn't update your username right now. Please try again.");
+        return;
+      }
+    }
+
     onUpdate({
       ...user, name: form.name, username: form.username, handicap,
       securityQuestion: form.securityQuestion, securityAnswer,
