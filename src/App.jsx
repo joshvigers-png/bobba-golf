@@ -12,6 +12,7 @@ import {
   deleteUser,
   onAuthStateChanged,
   sendEmailVerification,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -76,72 +77,10 @@ function waitForAuthReady(uid, timeoutMs = 6000) {
   });
 }
 
-// ─── One-time localStorage → Firestore migration ─────────────────────────────
-// Runs after a new Firebase account is created. Finds the matching old
-// localStorage account by email, migrates all their data (rounds, goals,
-// bag, competitions, active round, handicap history) into Firestore under
-// the new Firebase UID, then clears the old localStorage keys.
-// Safe to run multiple times — if there's nothing to migrate it's a no-op.
-async function migrateLocalDataToFirestore(newUid, email) {
-  try {
-    // Find the matching old account by email
-    const allAccounts = LS.get("bb_accounts") || [];
-    const oldAccount = allAccounts.find(
-      a => a.email?.trim().toLowerCase() === email.trim().toLowerCase()
-    );
-    if (!oldAccount) return; // No old data — fresh signup, nothing to migrate
-
-    const oldId = oldAccount.id;
-    console.log(`[Migration] Found old account ${oldId} for ${email} — migrating to Firebase UID ${newUid}`);
-
-    // 1. Migrate rounds
-    const rounds = LS.get(`bb_rounds_${oldId}`) || [];
-    for (const round of rounds) {
-      await DB.setRound(newUid, round);
-    }
-    console.log(`[Migration] Migrated ${rounds.length} rounds`);
-
-    // 2. Migrate goals
-    const goals = LS.get(`bb_goals_${oldId}`) || [];
-    for (const goal of goals) {
-      await DB.setGoal(newUid, goal);
-    }
-    console.log(`[Migration] Migrated ${goals.length} goals`);
-
-    // 3. Migrate competitions
-    const comps = LS.get(`bb_comps_${oldId}`) || [];
-    for (const comp of comps) {
-      await DB.setComp(newUid, comp);
-    }
-    console.log(`[Migration] Migrated ${comps.length} competitions`);
-
-    // 4. Migrate active round if any
-    const activeRound = LS.get(`bb_active_round_${oldId}`);
-    if (activeRound?.course?.holes?.length > 0) {
-      await DB.setActiveRound(newUid, activeRound);
-      console.log(`[Migration] Migrated active round`);
-    }
-
-    // 5. Clean up old localStorage keys
-    LS.del(`bb_rounds_${oldId}`);
-    LS.del(`bb_goals_${oldId}`);
-    LS.del(`bb_comps_${oldId}`);
-    LS.del(`bb_active_round_${oldId}`);
-
-    // 6. Remove old account from bb_accounts (keep others)
-    const remaining = allAccounts.filter(a => a.id !== oldId);
-    if (remaining.length > 0) {
-      LS.set("bb_accounts", remaining);
-    } else {
-      LS.del("bb_accounts");
-    }
-
-    console.log(`[Migration] Complete — all data moved to Firestore`);
-  } catch (err) {
-    // Migration failing shouldn't block the user from signing in
-    console.error("[Migration] Error:", err);
-  }
-}
+// ─── Firestore is the single source of truth for all user data ──────────────
+// Rounds, goals, competitions and active-round state are read from and
+// written to Firestore directly (see DB below) — no local-only storage,
+// no migration step, nothing that can be lost by clearing browser data.
 
 
 const DB = {
@@ -211,6 +150,72 @@ const DB = {
   },
 };
 
+// ─── Firestore sync helpers ──────────────────────────────────────────────────
+// Local storage is kept as a fast local cache (the rest of the app reads it
+// synchronously), but Firestore is the real source of truth. Every write to
+// the local cache below is paired with a Firestore write, and the cache is
+// refreshed straight from Firestore on every login — so nothing depends on
+// local data surviving on a single device.
+
+// Diffs an old vs new array (by `.id`) and pushes adds/updates/deletes to
+// Firestore. Fire-and-forget from the caller's point of view — errors are
+// logged, not thrown, so a flaky connection never blocks the UI. Since every
+// write already lands in the local cache immediately, a failed background
+// sync just means it'll be retried next time that list is saved.
+async function syncListToFirestore(uid, oldList, newList, setFn, deleteFn) {
+  try {
+    const oldIds = new Set((oldList || []).map(x => String(x.id)));
+    const newIds = new Set((newList || []).map(x => String(x.id)));
+    const deletions = [...oldIds].filter(id => !newIds.has(id));
+    await Promise.all([
+      ...(newList || []).map(item => setFn(uid, item)),
+      ...deletions.map(id => deleteFn(uid, id)),
+    ]);
+  } catch (err) {
+    console.error("[Firestore sync] failed:", err);
+  }
+}
+
+function syncRounds(uid, oldRounds, newRounds) {
+  syncListToFirestore(uid, oldRounds, newRounds, DB.setRound, DB.deleteRound);
+}
+function syncGoals(uid, oldGoals, newGoals) {
+  syncListToFirestore(uid, oldGoals, newGoals, DB.setGoal, DB.deleteGoal);
+}
+function syncComps(uid, oldComps, newComps) {
+  syncListToFirestore(uid, oldComps, newComps, DB.setComp, DB.deleteComp);
+}
+function syncActiveRound(uid, round) {
+  DB.setActiveRound(uid, round).catch(err => console.error("[Firestore sync] active round failed:", err));
+}
+function clearActiveRoundEverywhere(uid) {
+  DB.clearActiveRound(uid).catch(err => console.error("[Firestore sync] clear active round failed:", err));
+}
+
+// Pulls the real data down from Firestore into the local cache — called
+// right after login so every device/browser always starts from the actual
+// saved data, not whatever (if anything) happens to be in local storage.
+async function loadUserDataIntoCache(uid) {
+  try {
+    const [rounds, goals, comps, activeRound] = await Promise.all([
+      DB.getRounds(uid),
+      DB.getGoals(uid),
+      DB.getComps(uid),
+      DB.getActiveRound(uid),
+    ]);
+    LS.set(`bb_rounds_${uid}`, rounds);
+    LS.set(`bb_goals_${uid}`, goals);
+    LS.set(`bb_comps_${uid}`, comps);
+    if (activeRound) LS.set(`bb_active_round_${uid}`, activeRound);
+    else LS.del(`bb_active_round_${uid}`);
+  } catch (err) {
+    // If this fails (e.g. offline), fall back to whatever's already cached
+    // locally rather than blocking login entirely.
+    console.error("[Firestore sync] failed to load user data:", err);
+  }
+}
+
+
 // ─── Brand Assets (base64 embedded) ─────────────────────────────────────────
 const ICON_WHITE = "data:image/png;base64,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";
 const ICON_BLACK = "data:image/png;base64,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";
@@ -263,27 +268,8 @@ function normalizeAnswer(s) {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-// ─── Device trust for password reset ─────────────────────────────────────────
-// bb_user only ever holds the CURRENT session — once a login attempt fails
-// (e.g. the real bug we hit: a forgotten/mismatched password), there's no
-// active session left to check, so bb_user alone can't tell us "this is
-// genuinely your device." This separate, append-only record persists across
-// failed logins and signouts-of-other-accounts, so the reset screen can still
-// recognise a returning device. It's cleared only when that specific account
-// explicitly signs out, matching the security intent: signing out means
-// "stop trusting this device for this account."
-function markDeviceTrusted(userId) {
-  const known = LS.get("bb_known_accounts") || [];
-  if (!known.includes(userId)) LS.set("bb_known_accounts", [...known, userId]);
-}
-function isDeviceTrustedFor(userId) {
-  const known = LS.get("bb_known_accounts") || [];
-  return known.includes(userId);
-}
-function clearDeviceTrust(userId) {
-  const known = LS.get("bb_known_accounts") || [];
-  LS.set("bb_known_accounts", known.filter(id => id !== userId));
-}
+// (Device-trust tracking removed — password reset now goes through real
+// Firebase email links, which don't need a local "trusted device" concept.)
 
 // A working blocklist of slurs, profanity, and common offensive terms. This
 // is intentionally not exhaustive — no client-side wordlist ever fully is —
@@ -951,23 +937,45 @@ function SplashScreen({ onDone }) {
 // ─── One-time prompt for accounts created before usernames existed ───────────
 function SetUsernameScreen({ user, onSaved }) {
   const [username, setUsername] = useState("");
-  const [status, setStatus] = useState(null); // null | "ok" | "error"
+  const [status, setStatus] = useState(null); // null | "checking" | "ok" | "error"
   const [error, setError] = useState("");
 
-  const handleChange = (val) => {
+  const handleChange = async (val) => {
     const cleaned = val.replace(/\s/g, "");
     setUsername(cleaned);
     if (!cleaned) { setStatus(null); setError(""); return; }
-    const acc = LS.get("bb_accounts") || [];
-    const err = validateUsername(cleaned, acc, user.id);
-    if (err) { setStatus("error"); setError(err); }
-    else { setStatus("ok"); setError(""); }
+    if (!USERNAME_FORMAT.test(cleaned)) {
+      setStatus("error"); setError("3-20 characters, letters/numbers/underscores only, must start with a letter.");
+      return;
+    }
+    if (containsBlockedTerm(cleaned)) {
+      setStatus("error"); setError("That username isn't allowed. Please choose another.");
+      return;
+    }
+    setStatus("checking");
+    try {
+      const taken = await DB.isUsernameTaken(cleaned);
+      if (taken && cleaned.toLowerCase() !== user.username?.toLowerCase()) {
+        setStatus("error"); setError("That username is already taken.");
+      } else {
+        setStatus("ok"); setError("");
+      }
+    } catch {
+      // If the check fails (e.g. flaky connection), don't block — it's
+      // validated again server-side on save.
+      setStatus("ok"); setError("");
+    }
   };
 
-  const save = () => {
-    const acc = LS.get("bb_accounts") || [];
-    const err = validateUsername(username, acc, user.id);
-    if (err) { setStatus("error"); setError(err); return; }
+  const save = async () => {
+    if (!username || status === "error") { setError(error || "Please choose a valid username."); return; }
+    try {
+      const taken = await DB.isUsernameTaken(username);
+      if (taken && username.toLowerCase() !== user.username?.toLowerCase()) {
+        setStatus("error"); setError("That username is already taken.");
+        return;
+      }
+    } catch { /* proceed — already checked live above */ }
     onSaved({ ...user, username });
   };
 
@@ -1012,68 +1020,33 @@ function SetUsernameScreen({ user, onSaved }) {
 
 
 // ─── Password reset ────────────────────────────────────────────────────────────
-// No backend/email here, so this works by confirming the account's email
-// directly in-app, then letting the person set a new password immediately —
-// safe because they're already the one holding this browser/device.
-function ResetPasswordScreen({ onBack, onReset, deviceIsTrustedFor }) {
-  const [step, setStep] = useState("email"); // email | verify | newpassword | done
+// Uses Firebase's real password reset — sends an email with a reset link.
+// This is the actual source of truth for accounts now, so this is the only
+// reset path that can work for any real account, on any device.
+function ResetPasswordScreen({ onBack }) {
   const [email, setEmail] = useState("");
-  const [account, setAccount] = useState(null);
   const [error, setError] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
 
-  const findAccount = () => {
+  const submit = async () => {
     setError("");
     const cleaned = email.trim().toLowerCase();
     if (!cleaned) { setError("Enter the email address on your account."); return; }
-    const acc = LS.get("bb_accounts") || [];
-    const found = acc.find(a => a.email?.trim().toLowerCase() === cleaned);
-    if (!found) {
-      // Deliberately the same generic message a successful match would lead
-      // toward failing on — don't reveal whether an email exists at all.
-      setError("If that's not right, double-check the email and try again.");
-      setAccount(null);
-      return;
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, cleaned);
+    } catch (e) {
+      // Firebase's email-enumeration protection means "user not found" and
+      // "success" often look identical here — that's intentional, so we
+      // always show the same confirmation regardless of the outcome.
+      if (e.code && e.code !== "auth/user-not-found" && e.code !== "auth/invalid-email") {
+        console.error("[Password reset] error:", e);
+      }
+    } finally {
+      setLoading(false);
+      setSent(true);
     }
-    setAccount(found);
-    // If this exact account is the one already signed in on this device,
-    // there's no real security benefit to a security question — you're
-    // already proven to be the account owner by having an active session
-    // here. Skip straight to setting a new password.
-    if (deviceIsTrustedFor(found.id)) {
-      setStep("newpassword");
-      return;
-    }
-    // Otherwise (a different device/browser, or no one signed in here),
-    // require the security question before allowing a reset — this is what
-    // stops someone who only knows your email from taking over your account.
-    if (!found.securityQuestion) {
-      setError("This account doesn't have a security question set up (it predates that feature). Password reset from a different device isn't available for it yet — try resetting from the device you're normally signed in on, or contact whoever manages the club.");
-      setAccount(null);
-      return;
-    }
-    setStep("verify");
-  };
-
-  const verifyAnswer = () => {
-    setError("");
-    if (normalizeAnswer(answer) !== account.securityAnswer) {
-      setError("That doesn't match. If you've genuinely forgotten it, this in-app reset can't help further without an email service connected — contact whoever manages the club for now.");
-      return;
-    }
-    setStep("newpassword");
-  };
-
-  const submitNewPassword = () => {
-    setError("");
-    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
-    if (newPassword !== confirmPassword) { setError("Passwords don't match."); return; }
-    const acc = LS.get("bb_accounts") || [];
-    const updated = acc.map(a => a.id === account.id ? { ...a, password: newPassword } : a);
-    LS.set("bb_accounts", updated);
-    setStep("done");
   };
 
   return (
@@ -1086,75 +1059,33 @@ function ResetPasswordScreen({ onBack, onReset, deviceIsTrustedFor }) {
           ← Back to Sign In
         </button>
 
-        {step === "email" && (
+        {!sent ? (
           <>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Reset Your Password</div>
             <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-              Enter the email address on your account to get started.
+              Enter the email address on your account and we'll send you a link to reset your password.
             </p>
             <div className="field" style={{ marginBottom: 22 }}>
               <label className="field-label">Email</label>
-              <input className="input" type="email" autoComplete="email" placeholder="you@email.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && findAccount()} />
+              <input className="input" type="email" autoComplete="email" placeholder="you@email.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
             </div>
             {error && (
               <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: C.black, fontWeight: 500 }}>
                 {error}
               </div>
             )}
-            <button className="btn btn-primary" onClick={findAccount}>Continue</button>
+            <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
+              {loading ? "Sending…" : "Send Reset Link"}
+            </button>
           </>
-        )}
-
-        {step === "verify" && (
-          <>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Confirm It's You</div>
-            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-              You're resetting this from a device that isn't currently signed into this account, so answer the security question set up at signup to confirm it's really you.
-            </p>
-            <div className="field">
-              <label className="field-label">{account.securityQuestion}</label>
-              <input className="input" placeholder="Your answer" value={answer} onChange={e => setAnswer(e.target.value)} onKeyDown={e => e.key === "Enter" && verifyAnswer()} />
-            </div>
-            {error && (
-              <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginTop: 18, marginBottom: 4, fontSize: 12.5, color: C.black, fontWeight: 500, lineHeight: 1.5 }}>
-                {error}
-              </div>
-            )}
-            <button className="btn btn-primary" onClick={verifyAnswer} style={{ marginTop: 22 }}>Continue</button>
-          </>
-        )}
-
-        {step === "newpassword" && (
-          <>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Set a New Password</div>
-            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-              Setting a new password for <b>{account.name}</b> ({account.email}). Your rounds, handicap, and bag are untouched.
-            </p>
-            <div className="field">
-              <label className="field-label">New Password</label>
-              <input className="input" type="password" autoComplete="new-password" placeholder="••••••••" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-            </div>
-            <div className="field" style={{ marginBottom: 22 }}>
-              <label className="field-label">Confirm New Password</label>
-              <input className="input" type="password" autoComplete="new-password" placeholder="••••••••" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && submitNewPassword()} />
-            </div>
-            {error && (
-              <div style={{ background: C.cloud, borderLeft: `3px solid ${C.red}`, padding: "11px 14px", marginBottom: 18, fontSize: 12.5, color: C.black, fontWeight: 500 }}>
-                {error}
-              </div>
-            )}
-            <button className="btn btn-primary" onClick={submitNewPassword}>Save New Password</button>
-          </>
-        )}
-
-        {step === "done" && (
+        ) : (
           <>
             <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#1B7A3D", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
               <div style={{ width: 20, height: 20, color: C.white }}><Icon.Check /></div>
             </div>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Password Updated</div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Check Your Email</div>
             <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-              You can now sign in with your new password.
+              If an account exists for <b>{email.trim()}</b>, a password reset link is on its way. Follow the link in that email to set a new password.
             </p>
             <button className="btn btn-primary" onClick={onBack}>Back to Sign In</button>
           </>
@@ -1222,21 +1153,16 @@ function AuthScreen({ onAuth, onShowReset }) {
         await cred.user.getIdToken(true);
         await waitForAuthReady(uid);
 
-        // Create Firestore profile — include bag and handicapHistory from
-        // old localStorage account if it exists, so nothing is lost
-        const oldAccounts = LS.get("bb_accounts") || [];
-        const oldAccount = oldAccounts.find(
-          a => a.email?.trim().toLowerCase() === email
-        );
+        // Create Firestore profile — fresh start, no legacy local data
         const profile = {
           id: uid,
           name: form.name,
           username: form.username.toLowerCase(),
           email,
-          handicap: oldAccount?.handicap ?? (form.handicap ? parseFloat(form.handicap) : null),
-          handicapHistory: oldAccount?.handicapHistory || [],
-          bag: oldAccount?.bag || [],
-          bagCompleted: oldAccount?.bagCompleted || false,
+          handicap: form.handicap ? parseFloat(form.handicap) : null,
+          handicapHistory: [],
+          bag: [],
+          bagCompleted: false,
           friends: [],
           friendRequests: [],
           joined: Date.now(),
@@ -1277,17 +1203,6 @@ function AuthScreen({ onAuth, onShowReset }) {
         // slow/blocked verification email can never trigger the rollback
         // above and delete an otherwise-successful account.
         try { await sendEmailVerification(cred.user); } catch { /* non-fatal */ }
-
-        // Migrate all existing localStorage data (rounds, goals, comps etc)
-        // into Firestore under the new Firebase UID — this preserves all
-        // data from the old localStorage-based system transparently.
-        // Migrate old localStorage data into Firestore — restricted to the
-        // one real account that actually has legacy local data to bring
-        // across. Every other signup is a genuinely fresh account with
-        // nothing to migrate, so we skip this step entirely for them.
-        if (email === "joshvigers@icloud.com") {
-          await migrateLocalDataToFirestore(uid, email);
-        }
 
         onAuth(profile);
       } else {
@@ -1460,6 +1375,11 @@ export default function App() {
       if (firebaseUser) {
         const profile = await DB.getUser(firebaseUser.uid);
         if (profile) {
+          // Pull the real rounds/goals/comps/active-round data down from
+          // Firestore into the local cache before showing the app, so this
+          // device always reflects what's actually saved — not just
+          // whatever happens to already be in its local storage.
+          await loadUserDataIntoCache(firebaseUser.uid);
           setUser(profile);
         } else {
           // Auth record exists but no Firestore profile — sign them out cleanly
@@ -1501,9 +1421,22 @@ export default function App() {
     const uid = user.id;
     const firebaseUser = auth.currentUser;
 
-    // Delete Firestore data
+    // Delete all Firestore data — profile doc plus every subcollection
+    try {
+      const [rounds, goals, comps] = await Promise.all([DB.getRounds(uid), DB.getGoals(uid), DB.getComps(uid)]);
+      await Promise.all([
+        ...rounds.map(r => DB.deleteRound(uid, r.id)),
+        ...goals.map(g => DB.deleteGoal(uid, g.id)),
+        ...comps.map(c => DB.deleteComp(uid, c.id)),
+        DB.clearActiveRound(uid),
+      ]);
+    } catch (err) {
+      console.error("[Delete account] Failed to clear subcollections:", err);
+    }
     await DB.deleteUser(uid);
     LS.del(`bb_rounds_${uid}`);
+    LS.del(`bb_goals_${uid}`);
+    LS.del(`bb_comps_${uid}`);
     LS.del(`bb_active_round_${uid}`);
 
     // Delete Firebase Auth account
@@ -1518,7 +1451,7 @@ export default function App() {
 
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => {}} /></>;
   if (!user) {
-    if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} deviceIsTrustedFor={isDeviceTrustedFor} /></>;
+    if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} /></>;
     return <><style>{css}</style><AuthScreen onAuth={setUser} onShowReset={() => setShowReset(true)} /></>;
   }
 
@@ -2338,29 +2271,41 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [recalcDone, setRecalcDone] = useState(false);
   const [recalcResult, setRecalcResult] = useState("");
   const [whsInfoOpen, setWhsInfoOpen] = useState(false);
-  const [migrateStatus, setMigrateStatus] = useState(null);
   const [confirmText, setConfirmText] = useState("");
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
   const photoInputRef = useRef(null);
 
-  const handleUsernameChange = (val) => {
+  const handleUsernameChange = async (val) => {
     const cleaned = val.replace(/\s/g, "");
     setForm({ ...form, username: cleaned });
     if (!cleaned) { setUsernameStatus(null); setUsernameError(""); return; }
     if (cleaned === user.username) { setUsernameStatus("unchanged"); setUsernameError(""); return; }
-    const acc = LS.get("bb_accounts") || [];
-    const err = validateUsername(cleaned, acc, user.id);
-    if (err) { setUsernameStatus("error"); setUsernameError(err); }
-    else { setUsernameStatus("ok"); setUsernameError(""); }
+    if (!USERNAME_FORMAT.test(cleaned)) {
+      setUsernameStatus("error"); setUsernameError("3-20 characters, letters/numbers/underscores only, must start with a letter.");
+      return;
+    }
+    if (containsBlockedTerm(cleaned)) {
+      setUsernameStatus("error"); setUsernameError("That username isn't allowed. Please choose another.");
+      return;
+    }
+    setUsernameStatus("checking");
+    try {
+      const taken = await DB.isUsernameTaken(cleaned);
+      if (taken) { setUsernameStatus("error"); setUsernameError("That username is already taken."); }
+      else { setUsernameStatus("ok"); setUsernameError(""); }
+    } catch {
+      setUsernameStatus("ok"); setUsernameError("");
+    }
   };
 
-  const save = () => {
+  const save = async () => {
     // Re-validate the username one last time before saving, same as signup
     if (form.username !== user.username) {
-      const acc = LS.get("bb_accounts") || [];
-      const err = validateUsername(form.username, acc, user.id);
-      if (err) { setUsernameStatus("error"); setUsernameError(err); return; }
+      try {
+        const taken = await DB.isUsernameTaken(form.username);
+        if (taken) { setUsernameStatus("error"); setUsernameError("That username is already taken."); return; }
+      } catch { /* proceed — already checked live above */ }
     }
     // Only overwrite the stored security answer if a new one was actually
     // typed — leaves the existing answer untouched if the field was left
@@ -2532,102 +2477,6 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
         <div style={{ width: 16, height: 16, color: C.ash }}><Icon.ChevronRight /></div>
       </div>
 
-      {/* Data Migration */}
-      {(() => {
-        // Scan all localStorage keys for any bb_rounds_ data —
-        // the old numeric ID may differ from the new Firebase UID
-        const allKeys = Object.keys(localStorage);
-        const roundKeys = allKeys.filter(k => k.startsWith("bb_rounds_") && k !== `bb_rounds_${user.id}`);
-        const goalKeys = allKeys.filter(k => k.startsWith("bb_goals_") && k !== `bb_goals_${user.id}`);
-        const compKeys = allKeys.filter(k => k.startsWith("bb_comps_") && k !== `bb_comps_${user.id}`);
-        const allAccounts = LS.get("bb_accounts") || [];
-        const oldAccount = allAccounts.find(a => a.email?.trim().toLowerCase() === user.email?.trim().toLowerCase());
-
-        const totalRounds = roundKeys.reduce((s, k) => s + (LS.get(k) || []).length, 0);
-        const hasOldData = roundKeys.length > 0 || goalKeys.length > 0 || compKeys.length > 0 || oldAccount;
-
-        if (!hasOldData) return null;
-
-        return (
-          <>
-            <div className="section-head"><span className="section-title">Data Migration</span></div>
-            <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>Transfer Your Data</div>
-              <div style={{ fontSize: 11.5, color: C.steel, marginTop: 3, lineHeight: 1.5, marginBottom: 14 }}>
-                Your rounds and data from the previous version hasn't transferred yet. Tap below to move it across — this only needs to be done once.
-                {totalRounds > 0 && <span style={{ color: "#1B7A3D", fontWeight: 700 }}> Found {totalRounds} rounds to transfer.</span>}
-              </div>
-              {migrateStatus === "done" && (
-                <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 16, height: 16, color: "#1B7A3D", flexShrink: 0 }}><Icon.Check /></div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1B7A3D" }}>Data transferred — close and reopen the app to see your rounds.</div>
-                </div>
-              )}
-              {migrateStatus === "error" && (
-                <div style={{ background: "#FFF0EE", border: "1px solid #C8392D", padding: "10px 14px", marginBottom: 12 }}>
-                  <div style={{ fontSize: 12.5, color: "#C8392D" }}>Transfer failed — please try again.</div>
-                </div>
-              )}
-              <button
-                className="btn btn-primary"
-                disabled={migrateStatus === "running" || migrateStatus === "done"}
-                style={{ opacity: migrateStatus === "running" || migrateStatus === "done" ? 0.6 : 1 }}
-                onClick={async () => {
-                  setMigrateStatus("running");
-                  try {
-                    // Migrate rounds from ALL old bb_rounds_ keys
-                    for (const key of roundKeys) {
-                      const rounds = LS.get(key) || [];
-                      for (const round of rounds) {
-                        await DB.setRound(user.id, round);
-                      }
-                      LS.del(key);
-                    }
-                    // Migrate goals
-                    for (const key of goalKeys) {
-                      const goals = LS.get(key) || [];
-                      for (const goal of goals) {
-                        await DB.setGoal(user.id, goal);
-                      }
-                      LS.del(key);
-                    }
-                    // Migrate competitions
-                    for (const key of compKeys) {
-                      const comps = LS.get(key) || [];
-                      for (const comp of comps) {
-                        await DB.setComp(user.id, comp);
-                      }
-                      LS.del(key);
-                    }
-                    // Migrate profile data (bag, handicap) from old account
-                    if (oldAccount) {
-                      const updates = {};
-                      if (!user.bag?.length && oldAccount.bag?.length) updates.bag = oldAccount.bag;
-                      if (user.handicap == null && oldAccount.handicap != null) updates.handicap = oldAccount.handicap;
-                      if (!user.handicapHistory?.length && oldAccount.handicapHistory?.length) updates.handicapHistory = oldAccount.handicapHistory;
-                      if (oldAccount.bagCompleted) updates.bagCompleted = true;
-                      if (Object.keys(updates).length > 0) {
-                        await DB.setUser(user.id, { ...user, ...updates });
-                        onUpdate({ ...user, ...updates });
-                      }
-                      // Clean up old account
-                      const remaining = allAccounts.filter(a => a.email?.trim().toLowerCase() !== user.email?.trim().toLowerCase());
-                      remaining.length > 0 ? LS.set("bb_accounts", remaining) : LS.del("bb_accounts");
-                    }
-                    setMigrateStatus("done");
-                  } catch (e) {
-                    console.error("Migration error:", e);
-                    setMigrateStatus("error");
-                  }
-                }}
-              >
-                {migrateStatus === "running" ? "Transferring…" : migrateStatus === "done" ? "Transferred ✓" : "Transfer My Data"}
-              </button>
-            </div>
-          </>
-        );
-      })()}
-
       <div className="section-head"><span className="section-title">Handicap</span></div>
       <div className="panel" style={{ padding: "16px 20px", marginBottom: 0 }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
@@ -2681,14 +2530,13 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
               return { ...r, handicapPlayed: handicapPlayed ?? r.handicapPlayed };
             });
 
-            // Persist corrected rounds
+            // Persist corrected rounds — local cache plus Firestore
             LS.set(`bb_rounds_${user.id}`, updatedRounds);
+            syncRounds(user.id, rounds, updatedRounds);
 
-            // Update user with new index and history
+            // Update user with new index and history (onUpdate writes to Firestore)
             const updated = { ...user, handicap: newIndex, handicapHistory: newHistory };
             onUpdate(updated);
-            const acc = LS.get("bb_accounts") || [];
-            LS.set("bb_accounts", acc.map(a => a.id === user.id ? updated : a));
             setRecalcDone(true);
             setRecalcResult(newIndex.toFixed(1));
           }}
@@ -3018,6 +2866,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   if (savedActive && !savedIsValid) {
     // Clear the broken saved state so we don't loop back to it on every open.
     LS.del(`bb_active_round_${user.id}`);
+    clearActiveRoundEverywhere(user.id);
   }
   const [step, setStep] = useState(savedIsValid ? "card" : "search");
   const [query, setQuery] = useState("");
@@ -3181,7 +3030,10 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     }
   };
 
-  const persistActive = (next) => LS.set(`bb_active_round_${user.id}`, next);
+  const persistActive = (next) => {
+    LS.set(`bb_active_round_${user.id}`, next);
+    syncActiveRound(user.id, next);
+  };
 
   const startRound = () => {
     const initial = { course, setup, scores: {}, startedAt: Date.now() };
@@ -3244,7 +3096,9 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     };
     const nextRounds = [...rounds, record];
     LS.set(`bb_rounds_${user.id}`, nextRounds);
+    syncRounds(user.id, rounds, nextRounds);
     LS.del(`bb_active_round_${user.id}`);
+    clearActiveRoundEverywhere(user.id);
 
     // Recalculate handicap index per WHS — but don't let it silently override
     // a manually-entered starting handicap until there's enough real data
@@ -3723,6 +3577,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           </p>
           <button className="btn btn-primary" onClick={() => {
             LS.del(`bb_active_round_${user.id}`);
+            clearActiveRoundEverywhere(user.id);
             setCourse(null);
             setScores({});
             setStep("search");
@@ -3805,6 +3660,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
     const rounds = LS.get(`bb_rounds_${user.id}`) || [];
     const next = rounds.map(r => r.id === round.id ? updated : r);
     LS.set(`bb_rounds_${user.id}`, next);
+    syncRounds(user.id, rounds, next);
     const diffs = next.filter(r => r.differential != null).map(r => r.differential);
     const newIndex = calcHandicapIndex(diffs);
     // Same protection as round submission: don't let a recalculation
@@ -4632,7 +4488,11 @@ function CompetitionScreen({ user, onBack }) {
   const [activeComp, setActiveComp] = useState(null);
   const [detailComp, setDetailComp] = useState(null);
 
-  const persist = (next) => { setComps(next); LS.set(compsKey(user.id), next); };
+  const persist = (next) => {
+    syncComps(user.id, comps, next);
+    setComps(next);
+    LS.set(compsKey(user.id), next);
+  };
   const deleteComp = (id) => persist(comps.filter(c => c.id !== id));
   const [deleteTarget, setDeleteTarget] = useState(null);
 
@@ -6818,6 +6678,7 @@ function HistoryScreen({ user, onBack, onReviewRound, onViewRound, onUpdateUser 
     if (!deleteTarget) return;
     const next = allRounds.filter(r => r.id !== deleteTarget.id);
     LS.set(`bb_rounds_${user.id}`, next);
+    syncRounds(user.id, allRounds, next);
     setAllRounds(next);
     const diffs = next.filter(r => r.differential != null).map(r => r.differential);
     const newIndex = calcHandicapIndex(diffs);
@@ -7528,7 +7389,11 @@ function GoalsScreen({ user, onBack, onUpdateUser }) {
   const rounds = LS.get(`bb_rounds_${user.id}`) || [];
   const stats = computeGameStats(user, rounds, "all");
 
-  const persist = (next) => { setGoals(next); LS.set(goalsKey(user.id), next); };
+  const persist = (next) => {
+    syncGoals(user.id, goals, next);
+    setGoals(next);
+    LS.set(goalsKey(user.id), next);
+  };
 
   const openAdd = () => { setForm({ type: "handicap", title: "", target: "", dueDate: "" }); setSheetOpen(true); };
 
