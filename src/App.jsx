@@ -1386,6 +1386,24 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
         )}
 
         <div className="field">
+          <label className="field-label">Password</label>
+          <input
+            className="input"
+            type="password"
+            placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"}
+            value={form.password}
+            onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            disabled={mode === "signup" && verifyStage !== "idle"}
+          />
+          {mode === "signup" && (
+            <p style={{ fontSize: 10.5, color: C.steel, marginTop: 5, lineHeight: 1.5 }}>
+              At least 8 characters, with a letter, a number, and a special character.
+            </p>
+          )}
+        </div>
+
+        <div className="field">
           <label className="field-label">Email</label>
           <div style={{ position: "relative" }}>
             <input
@@ -1436,36 +1454,11 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
           )}
         </div>
 
-        <div className="field">
-          <label className="field-label">Password</label>
-          <input
-            className="input"
-            type="password"
-            placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"}
-            value={form.password}
-            onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            disabled={mode === "signup" && verifyStage !== "idle"}
-          />
-          {mode === "signup" && (
-            <p style={{ fontSize: 10.5, color: C.steel, marginTop: 5, lineHeight: 1.5 }}>
-              At least 8 characters, with a letter, a number, and a special character.
-            </p>
-          )}
-        </div>
-
         {mode === "signup" && (
           <div className="field">
             <label className="field-label">Date of Birth</label>
             <input className="input" type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
             <p style={{ fontSize: 10.5, color: C.ash, marginTop: 5 }}>You must be 16 or older to use Bobba Golf.</p>
-          </div>
-        )}
-
-        {mode === "signup" && (
-          <div className="field">
-            <label className="field-label">Starting Handicap <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional</span></label>
-            <input className="input" type="number" step="0.1" min="0" max="54" placeholder="e.g. 14.2" value={form.handicap} onChange={e => setForm(f => ({ ...f, handicap: e.target.value }))} />
           </div>
         )}
 
@@ -1661,13 +1654,9 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
           {usernameStatus === "error" && <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{usernameError}</p>}
           {usernameStatus === "ok" && <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{form.username} is available</p>}
         </div>
-        <div className="field">
+        <div className="field" style={{ marginBottom: 22 }}>
           <label className="field-label">Date of Birth</label>
           <input className="input" type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
-        </div>
-        <div className="field" style={{ marginBottom: 22 }}>
-          <label className="field-label">Starting Handicap <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional</span></label>
-          <input className="input" type="number" step="0.1" min="0" max="54" placeholder="e.g. 14.2" value={form.handicap} onChange={e => setForm(f => ({ ...f, handicap: e.target.value }))} />
         </div>
         {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
         <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
