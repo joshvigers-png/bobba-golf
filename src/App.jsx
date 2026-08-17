@@ -1242,15 +1242,18 @@ function AuthScreen({ onAuth, onShowReset }) {
           joined: Date.now(),
         };
 
-        // Write the profile with a couple of retries — some browser/network
-        // combinations still race the fresh auth token even after the
-        // getIdToken(true) above. If every attempt fails, roll back the
-        // Auth account we just created instead of leaving a ghost account
-        // behind that would permanently block this email from signing up
-        // again without manual cleanup in the Firebase console.
+        // Write the profile with several retries — today's testing showed
+        // this can genuinely fail a few times in a row on a flaky mobile
+        // connection (Firestore reports this as "permission-denied" even
+        // though it's really a connection issue) before succeeding once the
+        // connection settles. Retrying persistently, with a longer total
+        // window, rides this out instead of giving up too early. If every
+        // attempt still fails, roll back the Auth account we just created
+        // so this email is never left stuck as a ghost account.
         let profileSaved = false;
         let lastErr = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
+        const maxAttempts = 6;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
             if (attempt > 0) await cred.user.getIdToken(true);
             await DB.setUser(uid, profile);
@@ -1258,7 +1261,9 @@ function AuthScreen({ onAuth, onShowReset }) {
             break;
           } catch (err) {
             lastErr = err;
-            await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
+            if (attempt < maxAttempts - 1) {
+              await new Promise(res => setTimeout(res, 700 * (attempt + 1)));
+            }
           }
         }
 
@@ -1292,7 +1297,20 @@ function AuthScreen({ onAuth, onShowReset }) {
         // listener has actually caught up before the first read.
         await cred.user.getIdToken(true);
         await waitForAuthReady(cred.user.uid);
-        const profile = await DB.getUser(cred.user.uid);
+
+        // Retry the profile read too — same flaky-connection resilience as
+        // signup, so a real, existing account never gets wrongly told
+        // "Account not found" just because of a transient connection hiccup.
+        let profile = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try {
+            if (attempt > 0) await cred.user.getIdToken(true);
+            profile = await DB.getUser(cred.user.uid);
+            break;
+          } catch {
+            if (attempt < 5) await new Promise(res => setTimeout(res, 700 * (attempt + 1)));
+          }
+        }
         if (!profile) { setError("Account not found — please sign up."); await signOut(auth); return; }
         onAuth(profile);
       }
