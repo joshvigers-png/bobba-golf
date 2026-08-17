@@ -1352,7 +1352,31 @@ function AuthScreen({ onAuth, onShowReset }) {
           </div>
         )}
 
-        {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
+        {error && (
+          <div style={{ marginBottom: 14 }}>
+            <p style={{ fontSize: 12.5, color: C.red, lineHeight: 1.5, marginBottom: 6 }}>{error}</p>
+            <p
+              style={{ fontSize: 12, color: C.steel, textDecoration: "underline", cursor: "pointer" }}
+              onClick={async () => {
+                if (!window.confirm("This clears this app's locally stored data on this device and reloads the page. You won't lose anything saved to your account — this only clears local cache. Continue?")) return;
+                try {
+                  localStorage.clear();
+                  sessionStorage.clear();
+                  if (window.indexedDB && indexedDB.databases) {
+                    const dbs = await indexedDB.databases();
+                    await Promise.all(dbs.map(d => d.name && new Promise(res => {
+                      const req = indexedDB.deleteDatabase(d.name);
+                      req.onsuccess = req.onerror = req.onblocked = res;
+                    })));
+                  }
+                } catch { /* best effort */ }
+                window.location.reload();
+              }}
+            >
+              Still stuck? Tap here to reset local app data on this device.
+            </p>
+          </div>
+        )}
 
         <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
           {loading ? (mode === "signup" ? "Creating account…" : "Signing in…") : (mode === "signup" ? "Create Account" : "Sign In")}
