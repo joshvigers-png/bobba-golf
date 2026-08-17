@@ -277,20 +277,8 @@ const LS = {
 // real-world limits of "duplicate" checking without a shared backend.
 const USERNAME_FORMAT = /^[a-zA-Z][a-zA-Z0-9_]{4,19}$/; // 5-20 chars total
 
-// ─── Security question (password reset identity check) ──────────────────────
-// With no email-sending backend, this is the only practical way to confirm
-// "you are who you say you are" when resetting a password from a device that
-// isn't already signed into the account. Not bulletproof, but far better
-// than "type someone's email and reset their password" with zero checks.
-const SECURITY_QUESTIONS = [
-  "What was the name of your first golf club (course)?",
-  "What is your favourite golf course you've played?",
-  "What was your childhood nickname?",
-  "What is the name of your first pet?",
-];
-function normalizeAnswer(s) {
-  return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-}
+// (Security questions removed — password reset now goes through real
+// Firebase email links, which don't need an in-app identity check.)
 
 // (Device-trust tracking removed — password reset now goes through real
 // Firebase email links, which don't need a local "trusted device" concept.)
@@ -2795,7 +2783,6 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     name: user.name, username: user.username || "", handicap: user.handicap != null ? String(user.handicap) : "",
-    securityQuestion: user.securityQuestion || SECURITY_QUESTIONS[0], securityAnswer: "",
   });
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -2844,16 +2831,11 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
         if (taken) { setUsernameStatus("error"); setUsernameError("That username is already taken."); return; }
       } catch { /* proceed — already checked live above */ }
     }
-    // Only overwrite the stored security answer if a new one was actually
-    // typed — leaves the existing answer untouched if the field was left
-    // blank (so editing your name doesn't accidentally wipe your security
-    // answer just because this field defaults empty for privacy).
-    const securityAnswer = form.securityAnswer.trim() ? normalizeAnswer(form.securityAnswer) : user.securityAnswer;
-    // Same protection for handicap: only treat it as "intentionally cleared"
-    // if the field is blank AND the user already had no handicap to begin
-    // with. If they had a real handicap and the field is blank (e.g. it was
-    // accidentally cleared while editing something else), keep the existing
-    // value rather than silently wiping it to null.
+    // Only treat handicap as "intentionally cleared" if the field is blank
+    // AND the user already had no handicap to begin with. If they had a
+    // real handicap and the field is blank (e.g. it was accidentally
+    // cleared while editing something else), keep the existing value
+    // rather than silently wiping it to null.
     const handicap = form.handicap.trim() ? parseFloat(form.handicap) : (user.handicap ?? null);
 
     // Keep the public username registry in sync if it changed
@@ -2869,7 +2851,6 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
 
     onUpdate({
       ...user, name: form.name, username: form.username, handicap,
-      securityQuestion: form.securityQuestion, securityAnswer,
     });
     setEditing(false);
   };
@@ -2956,19 +2937,6 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
             <div className="field" style={{ marginBottom: 22 }}>
               <label className="field-label">Handicap Index</label>
               <input className="input" type="number" step="0.1" min="0" max="54" value={form.handicap} onChange={e => setForm({ ...form, handicap: e.target.value })} />
-            </div>
-            <div className="field">
-              <label className="field-label">Security Question</label>
-              <select className="input" value={form.securityQuestion} onChange={e => setForm({ ...form, securityQuestion: e.target.value })} style={{ appearance: "none" }}>
-                {SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 22 }}>
-              <label className="field-label">Your Answer {user.securityAnswer && <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>(already set — leave blank to keep it)</span>}</label>
-              <input className="input" placeholder={user.securityAnswer ? "••••••••" : "Your answer"} value={form.securityAnswer} onChange={e => setForm({ ...form, securityAnswer: e.target.value })} />
-              <p style={{ fontSize: 10.5, color: C.steel, marginTop: 6, lineHeight: 1.5 }}>
-                Used to verify it's you if you ever reset your password from a different device.
-              </p>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-primary" onClick={save} style={{ flex: 1 }}>Save</button>
