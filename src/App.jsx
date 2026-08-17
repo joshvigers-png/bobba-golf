@@ -4535,14 +4535,48 @@ function BagScreen({ user, onUpdateUser, onBack }) {
       </div>
 
       <div className="section-head"><span className="section-title">Clubs</span></div>
-      {sortedClubs.length === 0 && (
+
+      {user.bagCompleted && sortedClubs.length > 0 && (
+        <div style={{ margin: "0 18px 24px", background: C.white, border: `1px solid ${C.line}`, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `1.5px solid ${C.black}` }}>
+                <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel }}>Club</th>
+                <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel }}>Make / Model</th>
+                <th style={{ textAlign: "right", padding: "10px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: C.steel }}>Loft</th>
+                <th style={{ textAlign: "right", padding: "10px 12px" }}><div style={{ width: 13, height: 13, marginLeft: "auto" }}><Icon.Sun /></div></th>
+                <th style={{ textAlign: "right", padding: "10px 12px" }}><div style={{ width: 13, height: 13, marginLeft: "auto" }}><Icon.Snowflake /></div></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedClubs.map((c, i) => {
+                const summerY = c.summerYardage || c.yardage;
+                const winterY = c.winterYardage;
+                return (
+                  <tr key={c.id} onClick={() => openEdit(c)} style={{ borderBottom: i < sortedClubs.length - 1 ? `1px solid ${C.line}` : "none", cursor: "pointer" }}>
+                    <td style={{ padding: "10px 12px", fontWeight: 800 }}>{clubFullLabel(c)}</td>
+                    <td style={{ padding: "10px 12px", color: C.steel, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>
+                      {c.make || c.model ? `${c.make || ""} ${c.model || ""}`.trim() : "—"}
+                    </td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", color: C.steel }}>{c.loft ? `${c.loft}°` : "—"}</td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700 }}>{summerY || "—"}</td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700 }}>{winterY || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(!user.bagCompleted || sortedClubs.length === 0) && sortedClubs.length === 0 && (
         <div className="empty">
           <div className="empty-icon"><Icon.Club /></div>
           <div className="empty-title">Your bag is empty</div>
           <div className="empty-sub">Tap the + button to add your first club.</div>
         </div>
       )}
-      {sortedClubs.map(c => {
+      {!user.bagCompleted && sortedClubs.map(c => {
         const code = clubCode(c);
         const summerY = c.summerYardage || c.yardage; // fall back to legacy single-yardage field
         const winterY = c.winterYardage;
