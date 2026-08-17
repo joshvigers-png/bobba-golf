@@ -13,6 +13,8 @@ import {
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -1416,12 +1418,38 @@ export default function App() {
     setUser(null);
   };
 
-  const deleteAccount = async () => {
-    if (!user) return;
+  const deleteAccount = async (password) => {
+    if (!user) return { ok: false, error: "Not signed in." };
     const uid = user.id;
     const firebaseUser = auth.currentUser;
+    if (!firebaseUser) return { ok: false, error: "Not signed in." };
 
-    // Delete all Firestore data — profile doc plus every subcollection
+    // Firebase requires a *recent* login before it will allow deleting the
+    // account — reauthenticate with the password up front so this can't
+    // silently fail and just sign the person out while leaving everything
+    // (account + all their data) still sitting on the server.
+    try {
+      const cred = EmailAuthProvider.credential(firebaseUser.email, password);
+      await reauthenticateWithCredential(firebaseUser, cred);
+    } catch (e) {
+      if (e.code === "auth/wrong-password" || e.code === "auth/invalid-credential") {
+        return { ok: false, error: "That password isn't right." };
+      }
+      return { ok: false, error: "Couldn't verify your password. Please try again." };
+    }
+
+    // Delete the Firebase Auth account first — if this fails, nothing else
+    // has been touched, so the account and its data are still safe.
+    try {
+      await deleteUser(firebaseUser);
+    } catch (e) {
+      return { ok: false, error: "Account deletion failed. Please try again." };
+    }
+
+    // Now delete all Firestore data — profile doc plus every subcollection.
+    // The Auth account is already gone at this point, so even if this part
+    // partially fails, the person can no longer sign back in — we just log
+    // it so orphaned data can be cleaned up manually if it ever happens.
     try {
       const [rounds, goals, comps] = await Promise.all([DB.getRounds(uid), DB.getGoals(uid), DB.getComps(uid)]);
       await Promise.all([
@@ -1430,23 +1458,17 @@ export default function App() {
         ...comps.map(c => DB.deleteComp(uid, c.id)),
         DB.clearActiveRound(uid),
       ]);
+      await DB.deleteUser(uid);
     } catch (err) {
-      console.error("[Delete account] Failed to clear subcollections:", err);
+      console.error("[Delete account] Failed to fully clear Firestore data:", err);
     }
-    await DB.deleteUser(uid);
     LS.del(`bb_rounds_${uid}`);
     LS.del(`bb_goals_${uid}`);
     LS.del(`bb_comps_${uid}`);
     LS.del(`bb_active_round_${uid}`);
 
-    // Delete Firebase Auth account
-    if (firebaseUser) {
-      try { await deleteUser(firebaseUser); } catch (e) {
-        // If delete fails (needs recent login), sign out anyway
-        await signOut(auth);
-      }
-    }
     setUser(null);
+    return { ok: true };
   };
 
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => {}} /></>;
@@ -2272,6 +2294,9 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [recalcResult, setRecalcResult] = useState("");
   const [whsInfoOpen, setWhsInfoOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState(null); // null | "ok" | "error" | "unchanged"
   const [usernameError, setUsernameError] = useState("");
   const photoInputRef = useRef(null);
@@ -2564,7 +2589,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
       </div>
 
       {deleteOpen && (
-        <div className="sheet-overlay" onClick={() => { setDeleteOpen(false); setConfirmText(""); }}>
+        <div className="sheet-overlay" onClick={() => { setDeleteOpen(false); setConfirmText(""); setDeletePassword(""); setDeleteError(""); }}>
           <div className="sheet" onClick={e => e.stopPropagation()}>
             <div className="sheet-handle" />
             <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#FCE9E7", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
@@ -2584,15 +2609,30 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
               <input className="input" value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder="DELETE" autoCapitalize="characters" />
             </div>
 
+            <div className="field" style={{ marginTop: 12 }}>
+              <label className="field-label">Confirm your password</label>
+              <input className="input" type="password" value={deletePassword} onChange={e => { setDeletePassword(e.target.value); setDeleteError(""); }} placeholder="••••••••" autoComplete="current-password" />
+            </div>
+
+            {deleteError && (
+              <p style={{ fontSize: 12.5, color: C.red, marginTop: 10, lineHeight: 1.5 }}>{deleteError}</p>
+            )}
+
             <button
               className="btn"
-              onClick={onDeleteAccount}
-              disabled={confirmText.trim().toUpperCase() !== "DELETE"}
-              style={{ background: C.red, color: C.white, opacity: confirmText.trim().toUpperCase() === "DELETE" ? 1 : 0.4, marginBottom: 10 }}
+              onClick={async () => {
+                setDeleteError("");
+                setDeleting(true);
+                const result = await onDeleteAccount(deletePassword);
+                setDeleting(false);
+                if (!result.ok) setDeleteError(result.error);
+              }}
+              disabled={confirmText.trim().toUpperCase() !== "DELETE" || !deletePassword || deleting}
+              style={{ background: C.red, color: C.white, opacity: (confirmText.trim().toUpperCase() === "DELETE" && deletePassword && !deleting) ? 1 : 0.4, marginTop: 14, marginBottom: 10 }}
             >
-              Permanently Delete My Account
+              {deleting ? "Deleting…" : "Permanently Delete My Account"}
             </button>
-            <button className="btn btn-outline" onClick={() => { setDeleteOpen(false); setConfirmText(""); }}>Cancel</button>
+            <button className="btn btn-outline" onClick={() => { setDeleteOpen(false); setConfirmText(""); setDeletePassword(""); setDeleteError(""); }} disabled={deleting}>Cancel</button>
           </div>
         </div>
       )}
