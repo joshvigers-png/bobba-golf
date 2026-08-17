@@ -1177,6 +1177,13 @@ function AuthScreen({ onAuth, onShowReset }) {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         const uid = cred.user.uid;
 
+        // Force a fresh ID token and wait for it before touching Firestore.
+        // Without this, the very first write below can race Firestore's
+        // auth state and fail with "Missing or insufficient permissions"
+        // even though the account was created successfully — leaving a
+        // real Auth account with no profile doc behind it.
+        await cred.user.getIdToken(true);
+
         // Send email verification
         await sendEmailVerification(cred.user);
 
@@ -1210,6 +1217,10 @@ function AuthScreen({ onAuth, onShowReset }) {
       } else {
         // Sign in
         const cred = await signInWithEmailAndPassword(auth, email, password);
+        // Same safeguard as signup — make sure the fresh token is attached
+        // before the first Firestore read, so this can't misfire and show
+        // "Account not found" for a real, existing account.
+        await cred.user.getIdToken(true);
         const profile = await DB.getUser(cred.user.uid);
         if (!profile) { setError("Account not found — please sign up."); await signOut(auth); return; }
         onAuth(profile);
