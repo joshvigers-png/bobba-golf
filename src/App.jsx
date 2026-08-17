@@ -1752,6 +1752,16 @@ export default function App() {
   // Replaces the old LS.get("bb_user") approach. Firebase handles the session
   // token securely — we just listen for auth state changes and load the user
   // profile from Firestore when they're signed in.
+  const splashStartRef = useRef(Date.now());
+  const MIN_SPLASH_MS = 3000; // guarantees the branded splash is actually seen,
+                               // even when the login check finishes almost
+                               // instantly on a fast connection
+  const finishSplash = () => {
+    const remaining = MIN_SPLASH_MS - (Date.now() - splashStartRef.current);
+    if (remaining > 0) setTimeout(() => setSplash(false), remaining);
+    else setSplash(false);
+  };
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -1760,11 +1770,11 @@ export default function App() {
           // link yet. If AuthScreen is actively managing this exact flow
           // inline (its own "Verify Email" step), don't hijack the screen —
           // just let it keep doing its thing.
-          if (inlineSignupActiveRef.current) { setSplash(false); return; }
+          if (inlineSignupActiveRef.current) { finishSplash(); return; }
           setUser(null);
           setNeedsProfileSetup(null);
           setPendingVerificationEmail(firebaseUser.email);
-          setSplash(false);
+          finishSplash();
           return;
         }
         await finishLogin(firebaseUser);
@@ -1773,7 +1783,7 @@ export default function App() {
         setPendingVerificationEmail(null);
         setNeedsProfileSetup(null);
       }
-      setSplash(false);
+      finishSplash();
     });
     return () => unsub();
   }, []);
