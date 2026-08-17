@@ -1108,13 +1108,22 @@ function ResetPasswordScreen({ onBack }) {
   );
 }
 
-function AuthScreen({ onAuth, onShowReset }) {
+function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChange }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", username: "", password: "", dob: "", handicap: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState(null);
   const [usernameError, setUsernameError] = useState("");
+
+  // Email verification sub-flow for signup — Firebase needs a real account
+  // to send a verification link to, so the account is created at this step
+  // (not at final submit), then Create Account is locked until it's confirmed.
+  const [verifyStage, setVerifyStage] = useState("idle"); // idle | sending | pending | checking | verified
+  const [verifyError, setVerifyError] = useState("");
+  const [verifiedCred, setVerifiedCred] = useState(null); // the Firebase user credential once created
+  const [verifiedEmail, setVerifiedEmail] = useState(""); // locks in the email this verification is for
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const handleUsernameChange = async (val) => {
     const cleaned = val.replace(/\s/g, "");
@@ -1134,6 +1143,91 @@ function AuthScreen({ onAuth, onShowReset }) {
       setUsernameError("");
     }
   };
+
+  // If the person edits the email after starting verification, the account
+  // already created is for the OLD address — reset the flow so they can't
+  // end up verified for one email but submitting a different one.
+  const handleEmailChange = (val) => {
+    setForm(f => ({ ...f, email: val }));
+    if (verifyStage !== "idle" && val.trim().toLowerCase() !== verifiedEmail) {
+      setVerifyStage("idle");
+      setVerifiedCred(null);
+      setVerifiedEmail("");
+      setVerifyError("");
+    }
+  };
+
+  const startEmailVerification = async () => {
+    setVerifyError("");
+    const email = form.email.trim().toLowerCase();
+    const password = form.password;
+    if (!email) { setVerifyError("Enter your email first."); return; }
+    if (!password) { setVerifyError("Enter a password first — it's needed to create your account."); return; }
+    const pwdErr = validatePassword(password);
+    if (pwdErr) { setVerifyError(pwdErr); return; }
+
+    setVerifyStage("sending");
+    onSignupFlowChange?.(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // Same hardening as the rest of signup — make sure the fresh session
+      // is actually attached before doing anything else with this account.
+      await cred.user.getIdToken(true);
+      await waitForAuthReady(cred.user.uid);
+      await sendEmailVerification(cred.user);
+      setVerifiedCred(cred);
+      setVerifiedEmail(email);
+      setVerifyStage("pending");
+      setResendCooldown(30);
+    } catch (e) {
+      setVerifyStage("idle");
+      onSignupFlowChange?.(false);
+      if (e.code === "auth/email-already-in-use") setVerifyError("An account with this email already exists.");
+      else if (e.code === "auth/invalid-email") setVerifyError("Please enter a valid email address.");
+      else setVerifyError(e.message || "Couldn't send the verification email. Please try again.");
+    }
+  };
+
+  const checkEmailVerified = async () => {
+    if (!verifiedCred) return;
+    setVerifyStage("checking");
+    setVerifyError("");
+    try {
+      await verifiedCred.user.reload();
+      if (verifiedCred.user.emailVerified) {
+        setVerifyStage("verified");
+      } else {
+        setVerifyStage("pending");
+        setVerifyError("Not verified yet — tap the link in the email, then check again.");
+      }
+    } catch {
+      setVerifyStage("pending");
+      setVerifyError("Couldn't check right now. Please try again.");
+    }
+  };
+
+  const resendVerification = async () => {
+    if (!verifiedCred || resendCooldown > 0) return;
+    try {
+      await sendEmailVerification(verifiedCred.user);
+      setResendCooldown(30);
+    } catch (e) {
+      setVerifyError(e.code === "auth/too-many-requests" ? "Too many attempts — please wait a bit before resending." : "Couldn't resend right now.");
+    }
+  };
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
+  // Safety net — if this screen ever unmounts mid-verification for any
+  // reason, don't leave the top-level app permanently thinking an inline
+  // flow is in progress.
+  useEffect(() => {
+    return () => onSignupFlowChange?.(false);
+  }, []);
 
   const submit = async () => {
     setError(""); setLoading(true);
@@ -1155,18 +1249,10 @@ function AuthScreen({ onAuth, onShowReset }) {
         if (!USERNAME_FORMAT.test(form.username)) { setError("Username must be 5-20 characters, start with a letter, and only contain letters, numbers or underscores."); return; }
         const pwdErr = validatePassword(password);
         if (pwdErr) { setError(pwdErr); return; }
+        if (verifyStage !== "verified" || !verifiedCred) { setError("Please verify your email before creating your account."); return; }
 
-        // Create Firebase Auth account
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        const cred = verifiedCred;
         const uid = cred.user.uid;
-
-        // Force a fresh ID token, then wait for Firebase's own auth-state
-        // event to confirm this user before touching Firestore. Firestore's
-        // SDK reads its "who is this request from" from that event stream,
-        // not directly from getIdToken() — so this is the actual signal we
-        // need to wait for to avoid a permission-denied race.
-        await cred.user.getIdToken(true);
-        await waitForAuthReady(uid);
 
         // Create Firestore profile — fresh start, no legacy local data
         const profile = {
@@ -1211,14 +1297,14 @@ function AuthScreen({ onAuth, onShowReset }) {
         if (!profileSaved) {
           try { await deleteUser(cred.user); } catch { /* best effort cleanup */ }
           setError("Something went wrong finishing your signup. Please try again — this email is free to use again.");
+          setVerifyStage("idle");
+          setVerifiedCred(null);
+          setVerifiedEmail("");
+          onSignupFlowChange?.(false);
           return;
         }
 
-        // Send email verification — after the profile write succeeds, so a
-        // slow/blocked verification email can never trigger the rollback
-        // above and delete an otherwise-successful account.
-        try { await sendEmailVerification(cred.user); } catch { /* non-fatal */ }
-
+        onSignupFlowChange?.(false);
         onAuth(profile);
       } else {
         // Sign in
@@ -1242,6 +1328,7 @@ function AuthScreen({ onAuth, onShowReset }) {
           }
         }
         if (!profile) { setError("Account not found — please sign up."); await signOut(auth); return; }
+        if (!cred.user.emailVerified) { onNeedsVerification(email); return; }
         onAuth(profile);
       }
     } catch (e) {
@@ -1266,7 +1353,7 @@ function AuthScreen({ onAuth, onShowReset }) {
 
       <div className="auth-card">
         <div className="seg" style={{ marginBottom: 28 }}>
-          <button className={`seg-btn ${mode === "login" ? "on" : ""}`} onClick={() => setMode("login")}>Sign In</button>
+          <button className={`seg-btn ${mode === "login" ? "on" : ""}`} onClick={() => { setMode("login"); onSignupFlowChange?.(false); }}>Sign In</button>
           <button className={`seg-btn ${mode === "signup" ? "on" : ""}`} onClick={() => setMode("signup")}>Join</button>
         </div>
 
@@ -1300,12 +1387,66 @@ function AuthScreen({ onAuth, onShowReset }) {
 
         <div className="field">
           <label className="field-label">Email</label>
-          <input className="input" type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} autoComplete="email" />
+          <div style={{ position: "relative" }}>
+            <input
+              className="input"
+              type="email"
+              placeholder="you@email.com"
+              value={form.email}
+              onChange={e => mode === "signup" ? handleEmailChange(e.target.value) : setForm(f => ({ ...f, email: e.target.value }))}
+              autoComplete="email"
+              disabled={mode === "signup" && (verifyStage === "sending" || verifyStage === "pending" || verifyStage === "checking" || verifyStage === "verified")}
+              style={mode === "signup" && verifyStage === "verified" ? { paddingRight: 38 } : undefined}
+            />
+            {mode === "signup" && verifyStage === "verified" && (
+              <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "#1B7A3D" }}>
+                <Icon.Check />
+              </div>
+            )}
+          </div>
+
+          {mode === "signup" && verifyStage === "idle" && (
+            <button type="button" className="btn btn-outline" style={{ marginTop: 10, padding: "10px 14px", fontSize: 12.5 }} onClick={startEmailVerification}>
+              Verify Email
+            </button>
+          )}
+          {mode === "signup" && verifyStage === "sending" && (
+            <p style={{ fontSize: 11.5, color: C.steel, marginTop: 8 }}>Sending verification email…</p>
+          )}
+          {mode === "signup" && (verifyStage === "pending" || verifyStage === "checking") && (
+            <div style={{ marginTop: 10 }}>
+              <p style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.5, marginBottom: 8 }}>
+                We sent a link to <b>{verifiedEmail}</b>. Tap it, then come back and check below.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12.5, flex: 1 }} onClick={checkEmailVerified} disabled={verifyStage === "checking"}>
+                  {verifyStage === "checking" ? "Checking…" : "I've Verified — Check Now"}
+                </button>
+                <button type="button" className="btn btn-outline" style={{ padding: "9px 14px", fontSize: 12.5, flex: "0 0 auto" }} onClick={resendVerification} disabled={resendCooldown > 0}>
+                  {resendCooldown > 0 ? `Resend (${resendCooldown}s)` : "Resend"}
+                </button>
+              </div>
+            </div>
+          )}
+          {mode === "signup" && verifyStage === "verified" && (
+            <p style={{ fontSize: 11.5, color: "#1B7A3D", fontWeight: 700, marginTop: 8 }}>Email verified</p>
+          )}
+          {verifyError && (
+            <p style={{ fontSize: 11.5, color: C.red, marginTop: 8, lineHeight: 1.5 }}>{verifyError}</p>
+          )}
         </div>
 
         <div className="field">
           <label className="field-label">Password</label>
-          <input className="input" type="password" placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+          <input
+            className="input"
+            type="password"
+            placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"}
+            value={form.password}
+            onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            disabled={mode === "signup" && verifyStage !== "idle"}
+          />
           {mode === "signup" && (
             <p style={{ fontSize: 10.5, color: C.steel, marginTop: 5, lineHeight: 1.5 }}>
               At least 8 characters, with a letter, a number, and a special character.
@@ -1354,9 +1495,17 @@ function AuthScreen({ onAuth, onShowReset }) {
           </div>
         )}
 
-        <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
+        <button
+          className="btn btn-primary"
+          onClick={submit}
+          disabled={loading || (mode === "signup" && verifyStage !== "verified")}
+          style={{ opacity: (loading || (mode === "signup" && verifyStage !== "verified")) ? 0.4 : 1 }}
+        >
           {loading ? (mode === "signup" ? "Creating account…" : "Signing in…") : (mode === "signup" ? "Create Account" : "Sign In")}
         </button>
+        {mode === "signup" && verifyStage !== "verified" && (
+          <p style={{ fontSize: 11, color: C.ash, textAlign: "center", marginTop: 8 }}>Verify your email above to continue</p>
+        )}
 
         {mode === "login" && (
           <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={onShowReset}>Forgot password?</button>
@@ -1370,6 +1519,165 @@ function AuthScreen({ onAuth, onShowReset }) {
   );
 }
 
+// ─── Verification gate — shown when a real account exists and is signed in,
+// but the email link hasn't been clicked yet (e.g. reopening the app after
+// signup, or a login attempt on an unverified account).
+function EmailVerificationGateScreen({ email, onResend, onCheckAgain, onSignOut }) {
+  const [checking, setChecking] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-logo-mark">
+        <img src={LOGO_BLACK} alt="BOBBA GOLF" style={{ width: 110 }} />
+      </div>
+      <div className="auth-card">
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Verify Your Email</div>
+        <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+          We sent a link to <b>{email}</b>. Tap it, then come back here to continue.
+        </p>
+        {msg && <p style={{ fontSize: 12, color: C.red, marginBottom: 14, lineHeight: 1.5 }}>{msg}</p>}
+        <button
+          className="btn btn-primary"
+          disabled={checking}
+          style={{ marginBottom: 10, opacity: checking ? 0.6 : 1 }}
+          onClick={async () => {
+            setChecking(true); setMsg("");
+            const ok = await onCheckAgain();
+            setChecking(false);
+            if (!ok) setMsg("Not verified yet — check your email and tap the link.");
+          }}
+        >
+          {checking ? "Checking…" : "I've Verified — Check Now"}
+        </button>
+        <button
+          className="btn btn-outline"
+          disabled={cooldown > 0}
+          style={{ marginBottom: 10 }}
+          onClick={async () => { await onResend(); setCooldown(30); }}
+        >
+          {cooldown > 0 ? `Resend (${cooldown}s)` : "Resend Email"}
+        </button>
+        <button className="btn btn-outline" onClick={onSignOut}>Sign Out</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Shown once someone's email is verified but they closed the app before
+// finishing the rest of signup — collects the remaining profile details
+// rather than leaving them with a verified account they can never use.
+function FinishProfileScreen({ firebaseUser, onSaved }) {
+  const [form, setForm] = useState({ name: "", username: "", dob: "", handicap: "" });
+  const [usernameStatus, setUsernameStatus] = useState(null);
+  const [usernameError, setUsernameError] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleUsernameChange = async (val) => {
+    const cleaned = val.replace(/\s/g, "");
+    setForm(f => ({ ...f, username: cleaned }));
+    if (!cleaned) { setUsernameStatus(null); setUsernameError(""); return; }
+    const fmtErr = validateUsername(cleaned, []);
+    if (fmtErr) { setUsernameStatus("error"); setUsernameError(fmtErr); return; }
+    setUsernameStatus("checking");
+    try {
+      const taken = await DB.isUsernameTaken(cleaned);
+      setUsernameStatus(taken ? "error" : "ok");
+      setUsernameError(taken ? "Username already taken." : "");
+    } catch {
+      setUsernameStatus("ok"); setUsernameError("");
+    }
+  };
+
+  const submit = async () => {
+    setError("");
+    if (!form.dob) { setError("Please enter your date of birth."); return; }
+    const dob = new Date(form.dob);
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const m = today.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+    if (age < 16) { setError("You must be 16 or older to use Bobba Golf."); return; }
+    if (!form.name || !form.username) { setError("Please complete all fields."); return; }
+    if (usernameStatus === "error") { setError(usernameError || "Please choose a valid username."); return; }
+    if (!USERNAME_FORMAT.test(form.username)) { setError("Username must be 5-20 characters, start with a letter, and only contain letters, numbers or underscores."); return; }
+
+    setLoading(true);
+    const uid = firebaseUser.uid;
+    const profile = {
+      id: uid,
+      name: form.name,
+      username: form.username.toLowerCase(),
+      email: firebaseUser.email,
+      handicap: form.handicap ? parseFloat(form.handicap) : null,
+      handicapHistory: [],
+      bag: [],
+      bagCompleted: false,
+      friends: [],
+      friendRequests: [],
+      joined: Date.now(),
+    };
+    let saved = false;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        if (attempt > 0) await firebaseUser.getIdToken(true);
+        await DB.setUser(uid, profile);
+        saved = true;
+        break;
+      } catch {
+        if (attempt < 5) await new Promise(res => setTimeout(res, 700 * (attempt + 1)));
+      }
+    }
+    setLoading(false);
+    if (!saved) { setError("Something went wrong. Please try again."); return; }
+    onSaved(profile);
+  };
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-logo-mark">
+        <img src={LOGO_BLACK} alt="BOBBA GOLF" style={{ width: 110 }} />
+      </div>
+      <div className="auth-card">
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Finish Setting Up</div>
+        <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+          Your email's verified — just a few more details to finish creating your account.
+        </p>
+        <div className="field">
+          <label className="field-label">Full Name</label>
+          <input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        </div>
+        <div className="field">
+          <label className="field-label">Username</label>
+          <input className="input" value={form.username} onChange={e => handleUsernameChange(e.target.value)} />
+          {usernameStatus === "error" && <p style={{ fontSize: 11, color: C.red, marginTop: 6 }}>{usernameError}</p>}
+          {usernameStatus === "ok" && <p style={{ fontSize: 11, color: C.steel, marginTop: 6 }}>@{form.username} is available</p>}
+        </div>
+        <div className="field">
+          <label className="field-label">Date of Birth</label>
+          <input className="input" type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
+        </div>
+        <div className="field" style={{ marginBottom: 22 }}>
+          <label className="field-label">Starting Handicap <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional</span></label>
+          <input className="input" type="number" step="0.1" min="0" max="54" placeholder="e.g. 14.2" value={form.handicap} onChange={e => setForm(f => ({ ...f, handicap: e.target.value }))} />
+        </div>
+        {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
+        <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
+          {loading ? "Saving…" : "Finish Setup"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [splash, setSplash] = useState(true);
@@ -1379,7 +1687,33 @@ export default function App() {
   const [reviewRound, setReviewRound] = useState(null); // a submitted round being edited (Layer 3)
   const [viewRound, setViewRound] = useState(null); // a submitted round being viewed (Layer 2)
   const [showReset, setShowReset] = useState(false); // password reset flow
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null); // signed in but email not verified yet
+  const [needsProfileSetup, setNeedsProfileSetup] = useState(null); // verified but never finished creating a profile
+  const [inlineSignupActive, setInlineSignupActiveState] = useState(false); // AuthScreen is managing its own verify-then-create flow
+  const inlineSignupActiveRef = useRef(false);
+  const setInlineSignupActive = (val) => { inlineSignupActiveRef.current = val; setInlineSignupActiveState(val); };
   const [briefing, setBriefing] = useState(null); // login welcome-back popup: { briefing, hasNoRounds } | null
+
+  // Loads the Firestore profile + user data and completes login. Shared by
+  // the auth listener below and the "I've verified" button, so there's one
+  // single place this logic lives rather than two copies that could drift.
+  const finishLogin = async (firebaseUser) => {
+    const profile = await DB.getUser(firebaseUser.uid);
+    if (profile) {
+      await loadUserDataIntoCache(firebaseUser.uid);
+      setUser(profile);
+      setPendingVerificationEmail(null);
+      setNeedsProfileSetup(null);
+      return true;
+    } else {
+      // A verified Auth account with no Firestore profile means they closed
+      // the app after verifying but before finishing the rest of signup —
+      // route them to finish it rather than silently signing them out.
+      setUser(null);
+      setNeedsProfileSetup(firebaseUser);
+      return false;
+    }
+  };
 
   // ── Firebase Auth session listener ──
   // Replaces the old LS.get("bb_user") approach. Firebase handles the session
@@ -1388,21 +1722,23 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const profile = await DB.getUser(firebaseUser.uid);
-        if (profile) {
-          // Pull the real rounds/goals/comps/active-round data down from
-          // Firestore into the local cache before showing the app, so this
-          // device always reflects what's actually saved — not just
-          // whatever happens to already be in its local storage.
-          await loadUserDataIntoCache(firebaseUser.uid);
-          setUser(profile);
-        } else {
-          // Auth record exists but no Firestore profile — sign them out cleanly
-          await signOut(auth);
+        if (!firebaseUser.emailVerified) {
+          // Signed in at the Auth layer, but hasn't clicked the verification
+          // link yet. If AuthScreen is actively managing this exact flow
+          // inline (its own "Verify Email" step), don't hijack the screen —
+          // just let it keep doing its thing.
+          if (inlineSignupActiveRef.current) { setSplash(false); return; }
           setUser(null);
+          setNeedsProfileSetup(null);
+          setPendingVerificationEmail(firebaseUser.email);
+          setSplash(false);
+          return;
         }
+        await finishLogin(firebaseUser);
       } else {
         setUser(null);
+        setPendingVerificationEmail(null);
+        setNeedsProfileSetup(null);
       }
       setSplash(false);
     });
@@ -1485,9 +1821,37 @@ export default function App() {
   };
 
   if (splash) return <><style>{css}</style><SplashScreen onDone={() => {}} /></>;
+
+  if (needsProfileSetup) {
+    return <><style>{css}</style><FinishProfileScreen
+      firebaseUser={needsProfileSetup}
+      onSaved={async (profile) => {
+        await loadUserDataIntoCache(needsProfileSetup.uid);
+        setUser(profile);
+        setNeedsProfileSetup(null);
+      }}
+    /></>;
+  }
+
+  if (pendingVerificationEmail) {
+    return <><style>{css}</style><EmailVerificationGateScreen
+      email={pendingVerificationEmail}
+      onResend={async () => {
+        try { if (auth.currentUser) await sendEmailVerification(auth.currentUser); } catch { /* best effort */ }
+      }}
+      onCheckAgain={async () => {
+        if (!auth.currentUser) return false;
+        try { await auth.currentUser.reload(); } catch { return false; }
+        if (auth.currentUser.emailVerified) { await finishLogin(auth.currentUser); return true; }
+        return false;
+      }}
+      onSignOut={async () => { await signOut(auth); setPendingVerificationEmail(null); }}
+    /></>;
+  }
+
   if (!user) {
     if (showReset) return <><style>{css}</style><ResetPasswordScreen onBack={() => setShowReset(false)} /></>;
-    return <><style>{css}</style><AuthScreen onAuth={setUser} onShowReset={() => setShowReset(true)} /></>;
+    return <><style>{css}</style><AuthScreen onAuth={setUser} onShowReset={() => setShowReset(true)} onNeedsVerification={(email) => setPendingVerificationEmail(email)} onSignupFlowChange={setInlineSignupActive} /></>;
   }
 
   // Accounts created before usernames existed have no username at all —
