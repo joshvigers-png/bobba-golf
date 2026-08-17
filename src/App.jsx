@@ -52,6 +52,30 @@ const auth = initializeAuth(firebaseApp, {
 });
 const db = getFirestore(firebaseApp);
 
+// Firestore's SDK listens to Firebase Auth's internal "auth state changed"
+// stream to know who the current user is for outgoing requests — this can
+// lag behind what a direct getIdToken() call reports. Waiting for this
+// event to actually fire with the matching uid (rather than just trusting
+// getIdToken() resolved) is the reliable fix for "permission-denied"
+// immediately after signup/signin.
+function waitForAuthReady(uid, timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    let done = false;
+    let unsub = () => {};
+    const timer = setTimeout(() => {
+      if (!done) { done = true; unsub(); resolve(false); }
+    }, timeoutMs);
+    unsub = onAuthStateChanged(auth, (user) => {
+      if (!done && user && user.uid === uid) {
+        done = true;
+        clearTimeout(timer);
+        unsub();
+        resolve(true);
+      }
+    });
+  });
+}
+
 // ─── One-time localStorage → Firestore migration ─────────────────────────────
 // Runs after a new Firebase account is created. Finds the matching old
 // localStorage account by email, migrates all their data (rounds, goals,
@@ -1190,12 +1214,13 @@ function AuthScreen({ onAuth, onShowReset }) {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         const uid = cred.user.uid;
 
-        // Force a fresh ID token and wait for it before touching Firestore.
-        // Without this, the very first write below can race Firestore's
-        // auth state and fail with "Missing or insufficient permissions"
-        // even though the account was created successfully — leaving a
-        // real Auth account with no profile doc behind it.
+        // Force a fresh ID token, then wait for Firebase's own auth-state
+        // event to confirm this user before touching Firestore. Firestore's
+        // SDK reads its "who is this request from" from that event stream,
+        // not directly from getIdToken() — so this is the actual signal we
+        // need to wait for to avoid a permission-denied race.
         await cred.user.getIdToken(true);
+        await waitForAuthReady(uid);
 
         // Create Firestore profile — include bag and handicapHistory from
         // old localStorage account if it exists, so nothing is lost
@@ -1263,10 +1288,10 @@ function AuthScreen({ onAuth, onShowReset }) {
       } else {
         // Sign in
         const cred = await signInWithEmailAndPassword(auth, email, password);
-        // Same safeguard as signup — make sure the fresh token is attached
-        // before the first Firestore read, so this can't misfire and show
-        // "Account not found" for a real, existing account.
+        // Same safeguard as signup — make sure Firestore's internal auth
+        // listener has actually caught up before the first read.
         await cred.user.getIdToken(true);
+        await waitForAuthReady(cred.user.uid);
         const profile = await DB.getUser(cred.user.uid);
         if (!profile) { setError("Account not found — please sign up."); await signOut(auth); return; }
         onAuth(profile);
