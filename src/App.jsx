@@ -1184,9 +1184,6 @@ function AuthScreen({ onAuth, onShowReset }) {
         // real Auth account with no profile doc behind it.
         await cred.user.getIdToken(true);
 
-        // Send email verification
-        await sendEmailVerification(cred.user);
-
         // Create Firestore profile — include bag and handicapHistory from
         // old localStorage account if it exists, so nothing is lost
         const oldAccounts = LS.get("bb_accounts") || [];
@@ -1206,7 +1203,37 @@ function AuthScreen({ onAuth, onShowReset }) {
           friendRequests: [],
           joined: Date.now(),
         };
-        await DB.setUser(uid, profile);
+
+        // Write the profile with a couple of retries — some browser/network
+        // combinations still race the fresh auth token even after the
+        // getIdToken(true) above. If every attempt fails, roll back the
+        // Auth account we just created instead of leaving a ghost account
+        // behind that would permanently block this email from signing up
+        // again without manual cleanup in the Firebase console.
+        let profileSaved = false;
+        let lastErr = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) await cred.user.getIdToken(true);
+            await DB.setUser(uid, profile);
+            profileSaved = true;
+            break;
+          } catch (err) {
+            lastErr = err;
+            await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
+          }
+        }
+
+        if (!profileSaved) {
+          try { await deleteUser(cred.user); } catch { /* best effort cleanup */ }
+          setError("Something went wrong finishing your signup. Please try again — this email is free to use again.");
+          return;
+        }
+
+        // Send email verification — after the profile write succeeds, so a
+        // slow/blocked verification email can never trigger the rollback
+        // above and delete an otherwise-successful account.
+        try { await sendEmailVerification(cred.user); } catch { /* non-fatal */ }
 
         // Migrate all existing localStorage data (rounds, goals, comps etc)
         // into Firestore under the new Firebase UID — this preserves all
