@@ -253,7 +253,7 @@ const LS = {
 // Format: 3-20 chars, letters/numbers/underscores, must start with a letter.
 // This is checked client-side only — see the note in AuthScreen about the
 // real-world limits of "duplicate" checking without a shared backend.
-const USERNAME_FORMAT = /^[a-zA-Z][a-zA-Z0-9_]{2,19}$/;
+const USERNAME_FORMAT = /^[a-zA-Z][a-zA-Z0-9_]{4,19}$/; // 5-20 chars total
 
 // ─── Security question (password reset identity check) ──────────────────────
 // With no email-sending backend, this is the only practical way to confirm
@@ -300,13 +300,23 @@ function containsBlockedTerm(username) {
 function validateUsername(username, accounts, excludeId = null) {
   if (!username) return "Username is required.";
   if (!USERNAME_FORMAT.test(username)) {
-    return "3-20 characters, letters/numbers/underscores only, must start with a letter.";
+    return "5-20 characters, letters/numbers/underscores only, must start with a letter.";
   }
   if (containsBlockedTerm(username)) {
     return "That username isn't allowed. Please choose another.";
   }
   const taken = accounts.some(a => a.id !== excludeId && a.username?.toLowerCase() === username.toLowerCase());
   if (taken) return "That username is already taken.";
+  return null;
+}
+
+// Returns an error string, or null if the password meets requirements:
+// at least 8 characters, with a letter, a number, and a special character.
+function validatePassword(password) {
+  if (!password || password.length < 8) return "Password must be at least 8 characters.";
+  if (!/[a-zA-Z]/.test(password)) return "Password must include at least one letter.";
+  if (!/[0-9]/.test(password)) return "Password must include at least one number.";
+  if (!/[^a-zA-Z0-9]/.test(password)) return "Password must include at least one special character.";
   return null;
 }
 
@@ -476,7 +486,7 @@ const css = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  html,body,#root{height:100%;background:${C.black};touch-action:manipulation;}
+  html,body,#root{height:100%;background:${C.black};touch-action:manipulation;overflow-x:hidden;width:100%;max-width:100vw;}
   body{font-family:'Inter',sans-serif;color:${C.black};-webkit-font-smoothing:antialiased;letter-spacing:-0.014em;}
 
   .mono{font-family:'JetBrains Mono',monospace;}
@@ -565,7 +575,8 @@ const css = `
   /* ── Form ── */
   .field{margin-bottom:18px;}
   .field-label{font-size:10.5px;font-weight:700;color:${C.steel};text-transform:uppercase;letter-spacing:.12em;margin-bottom:9px;display:block;}
-  .input{width:100%;padding:14px 15px;border:1.5px solid ${C.line};border-radius:1px;font-size:16px;font-family:'Inter',sans-serif;background:${C.paper};color:${C.black};outline:none;transition:border-color .18s, background .18s, box-shadow .18s;}
+  .input{width:100%;max-width:100%;min-width:0;box-sizing:border-box;-webkit-appearance:none;appearance:none;padding:14px 15px;border:1.5px solid ${C.line};border-radius:1px;font-size:16px;font-family:'Inter',sans-serif;background:${C.paper};color:${C.black};outline:none;transition:border-color .18s, background .18s, box-shadow .18s;}
+  input[type="date"].input{color-scheme:light;}
   .input:focus{border-color:${C.black};background:${C.white};box-shadow:0 2px 12px rgba(10,10,10,.07);}
   .input::placeholder{color:${C.ash};}
 
@@ -591,10 +602,10 @@ const css = `
   .avatar{border-radius:50%;background:${C.black};color:${C.white};display:flex;align-items:center;justify-content:center;font-weight:800;font-family:'Inter',sans-serif;flex-shrink:0;}
 
   /* ── Auth ── */
-  .auth-wrap{min-height:100vh;background:${C.white};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 26px;max-width:430px;margin:0 auto;position:relative;overflow:hidden;}
+  .auth-wrap{min-height:100vh;width:100%;max-width:430px;box-sizing:border-box;background:${C.white};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 26px;margin:0 auto;position:relative;overflow:hidden;}
   .auth-wrap::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle, rgba(10,10,10,.05) 1px, transparent 1px);background-size:18px 18px;mask-image:radial-gradient(ellipse 60% 50% at 50% 0%, black, transparent);pointer-events:none;}
   .auth-logo-mark{position:relative;z-index:1;text-align:center;margin-bottom:36px;animation:fadeUp .7s cubic-bezier(.16,1,.3,1) both;}
-  .auth-card{background:${C.white};border:1px solid ${C.line};border-radius:2px;padding:34px 26px;width:100%;position:relative;z-index:1;box-shadow:0 24px 60px -20px rgba(10,10,10,.18), 0 2px 8px rgba(10,10,10,.04);animation:fadeUp .6s cubic-bezier(.16,1,.3,1) .18s both;opacity:0;}
+  .auth-card{background:${C.white};border:1px solid ${C.line};border-radius:2px;padding:34px 26px;width:100%;max-width:100%;box-sizing:border-box;position:relative;z-index:1;box-shadow:0 24px 60px -20px rgba(10,10,10,.18), 0 2px 8px rgba(10,10,10,.04);animation:fadeUp .6s cubic-bezier(.16,1,.3,1) .18s both;opacity:0;}
   .auth-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:${C.black};}
 
   /* ── Empty state ── */
@@ -947,7 +958,7 @@ function SetUsernameScreen({ user, onSaved }) {
     setUsername(cleaned);
     if (!cleaned) { setStatus(null); setError(""); return; }
     if (!USERNAME_FORMAT.test(cleaned)) {
-      setStatus("error"); setError("3-20 characters, letters/numbers/underscores only, must start with a letter.");
+      setStatus("error"); setError("5-20 characters, letters/numbers/underscores only, must start with a letter.");
       return;
     }
     if (containsBlockedTerm(cleaned)) {
@@ -1141,7 +1152,9 @@ function AuthScreen({ onAuth, onShowReset }) {
 
         if (!form.name || !email || !form.username || !password) { setError("Please complete all fields."); return; }
         if (usernameStatus === "error") { setError(usernameError || "Please choose a valid username."); return; }
-        if (!USERNAME_FORMAT.test(form.username)) { setError("Username must be 3-20 characters, start with a letter, and only contain letters, numbers or underscores."); return; }
+        if (!USERNAME_FORMAT.test(form.username)) { setError("Username must be 5-20 characters, start with a letter, and only contain letters, numbers or underscores."); return; }
+        const pwdErr = validatePassword(password);
+        if (pwdErr) { setError(pwdErr); return; }
 
         // Create Firebase Auth account
         const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -1234,7 +1247,7 @@ function AuthScreen({ onAuth, onShowReset }) {
     } catch (e) {
       if (e.code === "auth/email-already-in-use") setError("An account with this email already exists.");
       else if (e.code === "auth/wrong-password" || e.code === "auth/user-not-found" || e.code === "auth/invalid-credential") setError("Incorrect email or password.");
-      else if (e.code === "auth/weak-password") setError("Password must be at least 6 characters.");
+      else if (e.code === "auth/weak-password") setError("Password must be at least 8 characters, with a letter, a number, and a special character.");
       else if (e.code === "auth/invalid-email") setError("Please enter a valid email address.");
       else setError(e.message || "Something went wrong. Please try again.");
     } finally {
@@ -1288,16 +1301,16 @@ function AuthScreen({ onAuth, onShowReset }) {
         <div className="field">
           <label className="field-label">Email</label>
           <input className="input" type="email" placeholder="you@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} autoComplete="email" />
-          {mode === "signup" && (
-            <p style={{ fontSize: 10.5, color: "#1B7A3D", marginTop: 5, lineHeight: 1.5 }}>
-              ⚡ If you've been using the app already, use the same email — your rounds, handicap and data will be transferred automatically.
-            </p>
-          )}
         </div>
 
         <div className="field">
           <label className="field-label">Password</label>
-          <input className="input" type="password" placeholder={mode === "signup" ? "Minimum 6 characters" : "Your password"} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+          <input className="input" type="password" placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+          {mode === "signup" && (
+            <p style={{ fontSize: 10.5, color: C.steel, marginTop: 5, lineHeight: 1.5 }}>
+              At least 8 characters, with a letter, a number, and a special character.
+            </p>
+          )}
         </div>
 
         {mode === "signup" && (
@@ -2307,7 +2320,7 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
     if (!cleaned) { setUsernameStatus(null); setUsernameError(""); return; }
     if (cleaned === user.username) { setUsernameStatus("unchanged"); setUsernameError(""); return; }
     if (!USERNAME_FORMAT.test(cleaned)) {
-      setUsernameStatus("error"); setUsernameError("3-20 characters, letters/numbers/underscores only, must start with a letter.");
+      setUsernameStatus("error"); setUsernameError("5-20 characters, letters/numbers/underscores only, must start with a letter.");
       return;
     }
     if (containsBlockedTerm(cleaned)) {
