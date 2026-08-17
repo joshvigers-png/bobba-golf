@@ -1226,7 +1226,10 @@ function AuthScreen({ onAuth, onShowReset }) {
 
         if (!profileSaved) {
           try { await deleteUser(cred.user); } catch { /* best effort cleanup */ }
-          setError("Something went wrong finishing your signup. Please try again — this email is free to use again.");
+          // TEMP DEBUG: showing the raw error so we can diagnose on-device
+          // without needing a Mac/dev tools. Remove once root cause is found.
+          const debugDetail = lastErr ? ` [debug: ${lastErr.code || "no-code"} — ${lastErr.message || "no-message"}]` : "";
+          setError("Something went wrong finishing your signup. Please try again — this email is free to use again." + debugDetail);
           return;
         }
 
