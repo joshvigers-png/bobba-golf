@@ -1196,6 +1196,18 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
       await verifiedCred.user.reload();
       if (verifiedCred.user.emailVerified) {
         setVerifyStage("verified");
+        // The username check that ran while filling in the form couldn't
+        // actually query Firestore (that requires being signed in, and we
+        // weren't yet) — it silently assumed "available" rather than block
+        // the person on a check that genuinely couldn't run. Now that we're
+        // authenticated, re-run it for real so the tick shown is accurate.
+        if (form.username) {
+          try {
+            const taken = await DB.isUsernameTaken(form.username);
+            setUsernameStatus(taken ? "error" : "ok");
+            setUsernameError(taken ? "That username is already taken." : "");
+          } catch { /* leave as-is — final submit re-checks this again anyway */ }
+        }
       } else {
         setVerifyStage("pending");
         setVerifyError("Not verified yet — tap the link in the email, then check again.");
@@ -1253,6 +1265,28 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
 
         const cred = verifiedCred;
         const uid = cred.user.uid;
+
+        // Authoritative uniqueness check — the live indicator while typing
+        // couldn't actually reach Firestore (that requires being signed in,
+        // which happens during email verification, not before), so it may
+        // have shown "available" without ever really checking. Now that
+        // we're authenticated, this is the real, final gate before writing
+        // the account — nothing gets created without genuinely passing this.
+        try {
+          const taken = await DB.isUsernameTaken(form.username);
+          if (taken) {
+            setUsernameStatus("error");
+            setUsernameError("That username is already taken.");
+            setError("That username is already taken. Please choose another.");
+            return;
+          }
+        } catch {
+          // If even this authenticated check fails (e.g. a genuine network
+          // issue), don't silently proceed — better to ask them to retry
+          // than risk creating a duplicate.
+          setError("Couldn't confirm your username is available. Please try again.");
+          return;
+        }
 
         // Create Firestore profile — fresh start, no legacy local data
         const profile = {
@@ -1385,74 +1419,84 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
           </div>
         )}
 
-        <div className="field">
-          <label className="field-label">Password</label>
-          <input
-            className="input"
-            type="password"
-            placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"}
-            value={form.password}
-            onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            disabled={mode === "signup" && verifyStage !== "idle"}
-          />
-          {mode === "signup" && (
-            <p style={{ fontSize: 10.5, color: C.steel, marginTop: 5, lineHeight: 1.5 }}>
-              At least 8 characters, with a letter, a number, and a special character.
-            </p>
-          )}
-        </div>
-
-        <div className="field">
-          <label className="field-label">Email</label>
-          <div style={{ position: "relative" }}>
-            <input
-              className="input"
-              type="email"
-              placeholder="you@email.com"
-              value={form.email}
-              onChange={e => mode === "signup" ? handleEmailChange(e.target.value) : setForm(f => ({ ...f, email: e.target.value }))}
-              autoComplete="email"
-              disabled={mode === "signup" && (verifyStage === "sending" || verifyStage === "pending" || verifyStage === "checking" || verifyStage === "verified")}
-              style={mode === "signup" && verifyStage === "verified" ? { paddingRight: 38 } : undefined}
-            />
-            {mode === "signup" && verifyStage === "verified" && (
-              <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "#1B7A3D" }}>
-                <Icon.Check />
-              </div>
-            )}
-          </div>
-
-          {mode === "signup" && verifyStage === "idle" && (
-            <button type="button" className="btn btn-outline" style={{ marginTop: 10, padding: "10px 14px", fontSize: 12.5 }} onClick={startEmailVerification}>
-              Verify Email
-            </button>
-          )}
-          {mode === "signup" && verifyStage === "sending" && (
-            <p style={{ fontSize: 11.5, color: C.steel, marginTop: 8 }}>Sending verification email…</p>
-          )}
-          {mode === "signup" && (verifyStage === "pending" || verifyStage === "checking") && (
-            <div style={{ marginTop: 10 }}>
-              <p style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.5, marginBottom: 8 }}>
-                We sent a link to <b>{verifiedEmail}</b>. Tap it, then come back and check below.
-              </p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12.5, flex: 1 }} onClick={checkEmailVerified} disabled={verifyStage === "checking"}>
-                  {verifyStage === "checking" ? "Checking…" : "I've Verified — Check Now"}
-                </button>
-                <button type="button" className="btn btn-outline" style={{ padding: "9px 14px", fontSize: 12.5, flex: "0 0 auto" }} onClick={resendVerification} disabled={resendCooldown > 0}>
-                  {resendCooldown > 0 ? `Resend (${resendCooldown}s)` : "Resend"}
-                </button>
-              </div>
+        {(() => {
+          const passwordField = (
+            <div className="field" key="password">
+              <label className="field-label">Password</label>
+              <input
+                className="input"
+                type="password"
+                placeholder={mode === "signup" ? "Minimum 8 characters" : "Your password"}
+                value={form.password}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                disabled={mode === "signup" && verifyStage !== "idle"}
+              />
+              {mode === "signup" && (
+                <p style={{ fontSize: 10.5, color: C.steel, marginTop: 5, lineHeight: 1.5 }}>
+                  At least 8 characters, with a letter, a number, and a special character.
+                </p>
+              )}
             </div>
-          )}
-          {mode === "signup" && verifyStage === "verified" && (
-            <p style={{ fontSize: 11.5, color: "#1B7A3D", fontWeight: 700, marginTop: 8 }}>Email verified</p>
-          )}
-          {verifyError && (
-            <p style={{ fontSize: 11.5, color: C.red, marginTop: 8, lineHeight: 1.5 }}>{verifyError}</p>
-          )}
-        </div>
+          );
+
+          const emailField = (
+            <div className="field" key="email">
+              <label className="field-label">Email</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="you@email.com"
+                  value={form.email}
+                  onChange={e => mode === "signup" ? handleEmailChange(e.target.value) : setForm(f => ({ ...f, email: e.target.value }))}
+                  autoComplete="email"
+                  disabled={mode === "signup" && (verifyStage === "sending" || verifyStage === "pending" || verifyStage === "checking" || verifyStage === "verified")}
+                  style={mode === "signup" && verifyStage === "verified" ? { paddingRight: 38 } : undefined}
+                />
+                {mode === "signup" && verifyStage === "verified" && (
+                  <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "#1B7A3D" }}>
+                    <Icon.Check />
+                  </div>
+                )}
+              </div>
+
+              {mode === "signup" && verifyStage === "idle" && (
+                <button type="button" className="btn btn-outline" style={{ marginTop: 10, padding: "10px 14px", fontSize: 12.5 }} onClick={startEmailVerification}>
+                  Verify Email
+                </button>
+              )}
+              {mode === "signup" && verifyStage === "sending" && (
+                <p style={{ fontSize: 11.5, color: C.steel, marginTop: 8 }}>Sending verification email…</p>
+              )}
+              {mode === "signup" && (verifyStage === "pending" || verifyStage === "checking") && (
+                <div style={{ marginTop: 10 }}>
+                  <p style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.5, marginBottom: 8 }}>
+                    We sent a link to <b>{verifiedEmail}</b>. Tap it, then come back and check below.
+                  </p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12.5, flex: 1 }} onClick={checkEmailVerified} disabled={verifyStage === "checking"}>
+                      {verifyStage === "checking" ? "Checking…" : "I've Verified — Check Now"}
+                    </button>
+                    <button type="button" className="btn btn-outline" style={{ padding: "9px 14px", fontSize: 12.5, flex: "0 0 auto" }} onClick={resendVerification} disabled={resendCooldown > 0}>
+                      {resendCooldown > 0 ? `Resend (${resendCooldown}s)` : "Resend"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {mode === "signup" && verifyStage === "verified" && (
+                <p style={{ fontSize: 11.5, color: "#1B7A3D", fontWeight: 700, marginTop: 8 }}>Email verified</p>
+              )}
+              {verifyError && (
+                <p style={{ fontSize: 11.5, color: C.red, marginTop: 8, lineHeight: 1.5 }}>{verifyError}</p>
+              )}
+            </div>
+          );
+
+          // Signup: Password, then Email (verification happens here).
+          // Login: Email, then Password — the familiar order.
+          return mode === "signup" ? <>{passwordField}{emailField}</> : <>{emailField}{passwordField}</>;
+        })()}
 
         {mode === "signup" && (
           <div className="field">
