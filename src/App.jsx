@@ -4189,6 +4189,15 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   }
   const teeKey = round.tee;
   const teeInfo = course.tees[teeKey];
+  // If this course/tee has no rating and slope on record (common for
+  // courses found via basic search rather than a scanned scorecard),
+  // fall back to whatever was manually entered last time, or let the
+  // person enter it now — that's the only way "Played To" can ever be
+  // calculated for this round otherwise.
+  const [manualRating, setManualRating] = useState(round.rating != null ? String(round.rating) : "");
+  const [manualSlope, setManualSlope] = useState(round.slope != null ? String(round.slope) : "");
+  const effectiveRating = teeInfo?.rating ?? (manualRating ? parseFloat(manualRating) : null);
+  const effectiveSlope = teeInfo?.slope ?? (manualSlope ? parseFloat(manualSlope) : null);
 
   const updateHole = (n, field, val) => {
     setScores({ ...scores, [n]: { ...(scores[n]||{}), [field]: val } });
@@ -4221,8 +4230,11 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   const inNine  = nineSplit(course.holes.slice(9,18));
 
   const saveChanges = () => {
-    const diff = teeInfo ? scoreDifferential(totalGross, teeInfo.rating, teeInfo.slope) : null;
-    const updated = { ...round, courseName: editedCourseName.trim() || round.courseName, scores, totalGross, totalPts, totalPutts, holesPlayed, differential: diff, editedAt: Date.now() };
+    const diff = (effectiveRating != null && effectiveSlope != null) ? scoreDifferential(totalGross, effectiveRating, effectiveSlope) : null;
+    const updated = {
+      ...round, courseName: editedCourseName.trim() || round.courseName, scores, totalGross, totalPts, totalPutts, holesPlayed,
+      differential: diff, rating: effectiveRating, slope: effectiveSlope, editedAt: Date.now(),
+    };
     const rounds = LS.get(`bb_rounds_${user.id}`) || [];
     const next = rounds.map(r => r.id === round.id ? updated : r);
     LS.set(`bb_rounds_${user.id}`, next);
@@ -4364,6 +4376,37 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
           </div>
         </div>
         <p style={{ marginTop: 4 }}>{new Date(round.date).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</p>
+
+        {!teeInfo?.rating && (
+          <div style={{ marginTop: 14, padding: "12px 14px", background: C.cloud, border: `1px solid ${C.line}` }}>
+            <div style={{ fontSize: 11.5, fontWeight: 800, marginBottom: 4 }}>Course Rating & Slope missing</div>
+            <p style={{ fontSize: 10.5, color: C.steel, lineHeight: 1.5, marginBottom: 10 }}>
+              This course doesn't have a rating and slope on record, so "Played To" can't be calculated. Enter them from your scorecard to fix it for this round.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label className="field-label" style={{ fontSize: 9.5 }}>Course Rating</label>
+                <input
+                  className="input"
+                  type="number" step="0.1" placeholder="e.g. 71.2"
+                  value={manualRating}
+                  onChange={e => { setManualRating(e.target.value); setDirty(true); }}
+                  style={{ padding: "9px 10px", fontSize: 13 }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="field-label" style={{ fontSize: 9.5 }}>Slope Rating</label>
+                <input
+                  className="input"
+                  type="number" step="1" placeholder="e.g. 128"
+                  value={manualSlope}
+                  onChange={e => { setManualSlope(e.target.value); setDirty(true); }}
+                  style={{ padding: "9px 10px", fontSize: 13 }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div className="panel" style={{ marginTop: -1 }}>
         <RoundSummaryStrip round={{ ...round, totalGross, totalPts, coursePar: course.holes.reduce((s,h)=>s+h.par,0) }} user={user} />
