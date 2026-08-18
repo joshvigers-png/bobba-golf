@@ -4424,6 +4424,23 @@ function brandBadge(makeName) {
 // Bag icon shows which club it is (D, 3W, 4I, PW...) rather than the brand,
 // since with 12+ clubs in a bag "which club" is the useful glance-info.
 const WEDGE_TYPES = ["PW","GW","SW","LW"];
+// Shows a person's real profile photo when they have one, falling back to
+// initials otherwise — used anywhere another user's identity is displayed
+// (friends list, search results, requests).
+function PersonAvatar({ person, size = 44 }) {
+  return person?.photo ? (
+    <img
+      src={person.photo}
+      alt=""
+      style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0, display: "block" }}
+    />
+  ) : (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: size * 0.36, color: C.white, flexShrink: 0 }}>
+      {person?.name?.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
 function clubCode(club) {
   const cat = club.category;
   if (cat === "Driver") return "D";
@@ -6854,8 +6871,8 @@ function FriendCard({ friend, user, onUpdateUser }) {
 
   return (
     <div className="course-row" style={{ alignItems: "flex-start" }}>
-      <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0, marginRight: 12 }}>
-        {friend.name?.charAt(0).toUpperCase()}
+      <div style={{ marginRight: 12 }}>
+        <PersonAvatar person={friend} size={44} />
       </div>
       <div style={{ flex: 1 }}>
         <div className="course-name">{friend.name}</div>
@@ -6989,9 +7006,7 @@ function FriendSearchSheet({ user, onUpdateUser, onClose }) {
             </div>
             {results.map(r => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 8 }}>
-                <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 18, color: C.white, flexShrink: 0 }}>
-                  {r.name?.charAt(0).toUpperCase()}
-                </div>
+                <PersonAvatar person={r} size={44} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 800, fontSize: 14 }}>{r.name}</div>
                   <div style={{ fontSize: 12, color: C.steel }}>@{r.username}</div>
@@ -7084,9 +7099,7 @@ function FriendRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
           <p style={{ fontSize: 13, color: C.steel }}>No pending requests.</p>
         ) : profiles.map(p => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${C.line}` }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0 }}>
-              {p.name?.charAt(0).toUpperCase()}
-            </div>
+            <PersonAvatar person={p} size={40} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
               <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
@@ -7138,9 +7151,7 @@ function PendingRequestsSheet({ user, onUpdateUser, profiles, onClose }) {
           <p style={{ fontSize: 13, color: C.steel }}>No pending requests.</p>
         ) : profiles.map(p => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: `1px solid ${C.line}` }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: C.white, flexShrink: 0 }}>
-              {p.name?.charAt(0).toUpperCase()}
-            </div>
+            <PersonAvatar person={p} size={40} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
               <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
