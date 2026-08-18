@@ -5477,10 +5477,12 @@ function newRyderCupDay(n) {
 }
 
 function RyderCupHome({ user, onBack }) {
-  const [screen, setScreen] = useState("list"); // list | setup | detail
+  const [screen, setScreen] = useState("list"); // list | setup | detail | edit
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeEvent, setActiveEvent] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -5493,6 +5495,21 @@ function RyderCupHome({ user, onBack }) {
     };
     load();
   }, [user.id]);
+
+  const deleteEvent = async () => {
+    if (!activeEvent) return;
+    setDeleting(true);
+    try {
+      await DB.deleteRyderCupEvent(activeEvent.id);
+      setEvents(e => e.filter(ev => ev.id !== activeEvent.id));
+      setActiveEvent(null);
+      setDeleteConfirm(false);
+      setScreen("list");
+    } catch (e) {
+      console.error("Ryder Cup delete error:", e);
+    }
+    setDeleting(false);
+  };
 
   // ── Setup form (Step 1) ──
   if (screen === "setup") {
@@ -5509,7 +5526,23 @@ function RyderCupHome({ user, onBack }) {
     );
   }
 
-  // ── Event detail (placeholder until team selection / invites are built) ──
+  // ── Edit form (reuses the same setup screen, pre-filled) ──
+  if (screen === "edit" && activeEvent) {
+    return (
+      <RyderCupSetup
+        user={user}
+        existingEvent={activeEvent}
+        onBack={() => setScreen("detail")}
+        onSaved={(updated) => {
+          setEvents(e => e.map(ev => ev.id === updated.id ? updated : ev));
+          setActiveEvent(updated);
+          setScreen("detail");
+        }}
+      />
+    );
+  }
+
+  // ── Event detail ──
   if (screen === "detail" && activeEvent) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
@@ -5517,9 +5550,21 @@ function RyderCupHome({ user, onBack }) {
           <button onClick={() => setScreen("list")} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
             <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
           </button>
-          <div style={{ position: "relative", zIndex: 1 }}>
-            <div className="page-head-eyebrow">Ryder Cup</div>
-            <h1>{activeEvent.name}</h1>
+          <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <div className="page-head-eyebrow">Ryder Cup</div>
+              <h1>{activeEvent.name}</h1>
+            </div>
+            {activeEvent.hostUid === user.id && (
+              <div style={{ display: "flex", gap: 8, flexShrink: 0, marginTop: 2 }}>
+                <button onClick={() => setScreen("edit")} style={{ width: 34, height: 34, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                  <div style={{ width: 14, height: 14, color: C.black }}><Icon.Edit /></div>
+                </button>
+                <button onClick={() => setDeleteConfirm(true)} style={{ width: 34, height: 34, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                  <div style={{ width: 14, height: 14, color: C.red }}><Icon.Trash /></div>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -5545,6 +5590,22 @@ function RyderCupHome({ user, onBack }) {
             Next up: inviting players, setting up teams and captains, and picking pairings. Those steps are coming soon — this event is saved and ready for them.
           </p>
         </div>
+
+        {deleteConfirm && (
+          <div className="sheet-overlay" onClick={() => setDeleteConfirm(false)}>
+            <div className="sheet" onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 10 }}>Delete Event?</div>
+              <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 20 }}>
+                This permanently deletes "{activeEvent.name}" and its schedule. This can't be undone.
+              </p>
+              <button className="btn" onClick={deleteEvent} disabled={deleting} style={{ background: C.red, color: C.white, marginBottom: 10, opacity: deleting ? 0.6 : 1 }}>
+                {deleting ? "Deleting…" : "Delete Event"}
+              </button>
+              <button className="btn btn-outline" onClick={() => setDeleteConfirm(false)} disabled={deleting}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -5597,9 +5658,10 @@ function RyderCupHome({ user, onBack }) {
 }
 
 // Step 1 — event shell setup: name, days, games per day, format per game.
-function RyderCupSetup({ user, onBack, onCreated }) {
-  const [name, setName] = useState("");
-  const [days, setDays] = useState([newRyderCupDay(1)]);
+function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
+  const isEdit = !!existingEvent;
+  const [name, setName] = useState(existingEvent?.name || "");
+  const [days, setDays] = useState(existingEvent?.days || [newRyderCupDay(1)]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -5626,18 +5688,24 @@ function RyderCupSetup({ user, onBack, onCreated }) {
     if (!name.trim()) { setError("Give your event a name."); return; }
     setSaving(true);
     try {
-      const event = await DB.createRyderCupEvent({
-        name: name.trim(),
-        hostUid: user.id,
-        hostName: user.name,
-        participantIds: [user.id],
-        teams: [],
-        days,
-      });
-      onCreated(event);
+      if (isEdit) {
+        const updates = { name: name.trim(), days };
+        await DB.updateRyderCupEvent(existingEvent.id, updates);
+        onSaved({ ...existingEvent, ...updates });
+      } else {
+        const event = await DB.createRyderCupEvent({
+          name: name.trim(),
+          hostUid: user.id,
+          hostName: user.name,
+          participantIds: [user.id],
+          teams: [],
+          days,
+        });
+        onCreated(event);
+      }
     } catch (e) {
       console.error(e);
-      setError("Couldn't create the event. Please try again.");
+      setError(`Couldn't ${isEdit ? "save" : "create"} the event. Please try again.`);
     }
     setSaving(false);
   };
@@ -5649,8 +5717,8 @@ function RyderCupSetup({ user, onBack, onCreated }) {
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
         </button>
         <div style={{ position: "relative", zIndex: 1 }}>
-          <div className="page-head-eyebrow">Step 1 of 7</div>
-          <h1>Set Up Ryder Cup</h1>
+          <div className="page-head-eyebrow">{isEdit ? "Editing Event" : "Step 1 of 7"}</div>
+          <h1>{isEdit ? "Edit Ryder Cup" : "Set Up Ryder Cup"}</h1>
           <p>Name your event, then set the schedule — how many days, how many games each day, and the format for each.</p>
         </div>
       </div>
@@ -5723,7 +5791,7 @@ function RyderCupSetup({ user, onBack, onCreated }) {
         {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14 }}>{error}</p>}
 
         <button className="btn btn-primary" onClick={create} disabled={saving} style={{ opacity: saving ? 0.6 : 1 }}>
-          {saving ? "Creating…" : "Create Event"}
+          {saving ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save Changes" : "Create Event")}
         </button>
       </div>
     </div>
