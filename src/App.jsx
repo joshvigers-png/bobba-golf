@@ -223,6 +223,27 @@ const DB = {
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
+  // Events someone's been invited to but hasn't responded to yet
+  getRyderCupInvitesForUser: async (uid) => {
+    const q = query(collection(db, "rydercup_events"), where("pendingInvites", "array-contains", uid));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+  inviteToRyderCup: async (eventId, uid) => {
+    const event = await DB.getRyderCupEvent(eventId);
+    if (!event) throw new Error("Event not found");
+    const pending = event.pendingInvites || [];
+    const participants = event.participantIds || [];
+    if (participants.includes(uid) || pending.includes(uid)) return; // already invited/joined
+    await DB.updateRyderCupEvent(eventId, { pendingInvites: [...pending, uid] });
+  },
+  respondToRyderCupInvite: async (eventId, uid, accept) => {
+    const event = await DB.getRyderCupEvent(eventId);
+    if (!event) throw new Error("Event not found");
+    const pending = (event.pendingInvites || []).filter(id => id !== uid);
+    const participants = accept ? [...(event.participantIds || []), uid] : (event.participantIds || []);
+    await DB.updateRyderCupEvent(eventId, { pendingInvites: pending, participantIds: participants });
+  },
 };
 
 // ─── Firestore sync helpers ──────────────────────────────────────────────────
@@ -5479,22 +5500,55 @@ function newRyderCupDay(n) {
 function RyderCupHome({ user, onBack }) {
   const [screen, setScreen] = useState("list"); // list | setup | detail | edit
   const [events, setEvents] = useState([]);
+  const [invites, setInvites] = useState([]); // events I've been invited to but not responded to
   const [loading, setLoading] = useState(true);
   const [activeEvent, setActiveEvent] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
+  const [respondingId, setRespondingId] = useState(null);
+  const [playerProfiles, setPlayerProfiles] = useState([]); // resolved profiles for the active event's people
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        const list = await DB.getRyderCupEventsForUser(user.id);
+        const [list, myInvites] = await Promise.all([
+          DB.getRyderCupEventsForUser(user.id),
+          DB.getRyderCupInvitesForUser(user.id),
+        ]);
         setEvents(list.sort((a, b) => b.createdAt - a.createdAt));
+        setInvites(myInvites.sort((a, b) => b.createdAt - a.createdAt));
       } catch (e) { console.error("Ryder Cup load error:", e); }
       setLoading(false);
     };
     load();
   }, [user.id]);
+
+  // Load display profiles (name/username/photo) for everyone tied to the
+  // event being viewed — host, joined participants, and pending invites.
+  useEffect(() => {
+    if (!activeEvent) { setPlayerProfiles([]); return; }
+    const ids = [...new Set([activeEvent.hostUid, ...(activeEvent.participantIds || []), ...(activeEvent.pendingInvites || [])])];
+    Promise.all(ids.map(id => DB.getUserById(id)))
+      .then(list => setPlayerProfiles(list.filter(Boolean)))
+      .catch(e => console.error("Ryder Cup player load error:", e));
+  }, [activeEvent?.id, activeEvent?.participantIds?.join(","), activeEvent?.pendingInvites?.join(",")]);
+
+  const respondToInvite = async (event, accept) => {
+    setRespondingId(event.id);
+    try {
+      await DB.respondToRyderCupInvite(event.id, user.id, accept);
+      setInvites(inv => inv.filter(e => e.id !== event.id));
+      if (accept) {
+        const updated = { ...event, participantIds: [...(event.participantIds || []), user.id], pendingInvites: (event.pendingInvites || []).filter(id => id !== user.id) };
+        setEvents(e => [updated, ...e]);
+      }
+    } catch (e) {
+      console.error("Ryder Cup invite response error:", e);
+    }
+    setRespondingId(null);
+  };
 
   const deleteEvent = async () => {
     if (!activeEvent) return;
@@ -5584,10 +5638,55 @@ function RyderCupHome({ user, onBack }) {
           </div>
         ))}
 
-        <div style={{ margin: "20px 18px 0", padding: "16px", background: C.cloud, border: `1px solid ${C.line}` }}>
-          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Event created</div>
-          <p style={{ fontSize: 12, color: C.steel, lineHeight: 1.55 }}>
-            Next up: inviting players, setting up teams and captains, and picking pairings. Those steps are coming soon — this event is saved and ready for them.
+        <div className="section-head"><span className="section-title">Players</span></div>
+        <div style={{ margin: "0 18px 12px" }}>
+          {activeEvent.hostUid === user.id && (
+            <button className="btn btn-primary" onClick={() => setInviteSheetOpen(true)} style={{ marginBottom: 12 }}>
+              + Invite Players
+            </button>
+          )}
+          {[activeEvent.hostUid, ...(activeEvent.participantIds || []).filter(id => id !== activeEvent.hostUid)].map(id => {
+            const p = playerProfiles.find(pp => pp.id === id);
+            if (!p) return null;
+            return (
+              <div key={id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
+                <PersonAvatar person={p} size={36} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}{id === activeEvent.hostUid ? " (Host)" : ""}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
+                </div>
+                <span style={{ fontSize: 10.5, fontWeight: 800, color: "#1B7A3D", textTransform: "uppercase", letterSpacing: ".04em" }}>Joined</span>
+              </div>
+            );
+          })}
+          {(activeEvent.pendingInvites || []).map(id => {
+            const p = playerProfiles.find(pp => pp.id === id);
+            if (!p) return null;
+            return (
+              <div key={id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
+                <PersonAvatar person={p} size={36} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
+                </div>
+                <span style={{ fontSize: 10.5, fontWeight: 800, color: C.ash, textTransform: "uppercase", letterSpacing: ".04em" }}>Invited</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {inviteSheetOpen && (
+          <RyderCupInviteSheet
+            event={activeEvent}
+            user={user}
+            onClose={() => setInviteSheetOpen(false)}
+            onInvited={(uid) => setActiveEvent(ev => ({ ...ev, pendingInvites: [...(ev.pendingInvites || []), uid] }))}
+          />
+        )}
+
+        <div style={{ margin: "8px 18px 0", padding: "14px 16px", background: C.cloud, border: `1px solid ${C.line}` }}>
+          <p style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.55 }}>
+            Next up: setting up teams and captains, then match pairings. Coming soon.
           </p>
         </div>
 
@@ -5631,7 +5730,39 @@ function RyderCupHome({ user, onBack }) {
 
       {loading && <p style={{ textAlign: "center", color: C.steel, fontSize: 13, padding: "24px 0" }}>Loading…</p>}
 
-      {!loading && events.length === 0 && (
+      {!loading && invites.length > 0 && (
+        <>
+          <div className="section-head"><span className="section-title">Invitations</span></div>
+          {invites.map(ev => (
+            <div key={ev.id} style={{ margin: "0 18px 12px", padding: "14px 16px", background: C.white, border: `1.5px solid ${C.black}` }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 2 }}>{ev.name}</div>
+              <div style={{ fontSize: 11.5, color: C.steel, marginBottom: 12 }}>
+                Hosted by {ev.hostName || "a club member"} · {ev.days.length} day{ev.days.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ flex: 1, padding: "9px 14px", fontSize: 12.5 }}
+                  disabled={respondingId === ev.id}
+                  onClick={() => respondToInvite(ev, true)}
+                >
+                  {respondingId === ev.id ? "…" : "Accept"}
+                </button>
+                <button
+                  className="btn btn-outline"
+                  style={{ flex: 1, padding: "9px 14px", fontSize: 12.5 }}
+                  disabled={respondingId === ev.id}
+                  onClick={() => respondToInvite(ev, false)}
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {!loading && events.length === 0 && invites.length === 0 && (
         <div className="empty">
           <div className="empty-icon"><Icon.ModTrophy /></div>
           <div className="empty-title">No Ryder Cup events yet</div>
@@ -5698,6 +5829,7 @@ function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
           hostUid: user.id,
           hostName: user.name,
           participantIds: [user.id],
+          pendingInvites: [],
           teams: [],
           days,
         });
@@ -5793,6 +5925,133 @@ function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
         <button className="btn btn-primary" onClick={create} disabled={saving} style={{ opacity: saving ? 0.6 : 1 }}>
           {saving ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save Changes" : "Create Event")}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Step 2 — invite other app users to a Ryder Cup event. Reuses the same
+// username-search pattern as friend search, but invites into this specific
+// event rather than sending a friend request.
+function RyderCupInviteSheet({ event, user, onClose, onInvited }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError] = useState("");
+  const [invitedIds, setInvitedIds] = useState([]);
+
+  const alreadyInvolved = new Set([
+    event.hostUid,
+    ...(event.participantIds || []),
+    ...(event.pendingInvites || []),
+  ]);
+
+  const doSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearched(true);
+    setError("");
+    try {
+      let found = [];
+      if (q.includes("@")) {
+        const snap = await getDocs(query(collection(db, "users"), where("email", "==", q.toLowerCase())));
+        found = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } else {
+        found = await DB.searchByUsername(q.replace("@", ""));
+      }
+      setResults(found.filter(u => u.id !== user.id));
+    } catch (e) {
+      setError("Search failed — please try again.");
+    }
+    setSearching(false);
+  };
+
+  const invite = async (target) => {
+    try {
+      await DB.inviteToRyderCup(event.id, target.id);
+      setInvitedIds(ids => [...ids, target.id]);
+      onInvited(target.id);
+    } catch (e) {
+      console.error(e);
+      setError("Couldn't send that invite. Please try again.");
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: C.paper, zIndex: 200, overflowY: "auto" }}>
+      <div className="page-head">
+        <button onClick={onClose} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">Ryder Cup</div>
+          <h1>Invite Players</h1>
+          <p>Search by username or email address</p>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 18px" }}>
+        <div className="field" style={{ marginBottom: 12 }}>
+          <div style={{ position: "relative" }}>
+            <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: C.ash }}><Icon.Search /></div>
+            <input
+              className="input"
+              placeholder="Username or email"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && doSearch()}
+              style={{ padding: "14px 14px 14px 40px", fontSize: 15 }}
+            />
+          </div>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={doSearch}
+          disabled={searching || !searchQuery.trim()}
+          style={{ width: "100%", opacity: !searchQuery.trim() ? 0.5 : 1, marginBottom: 18 }}
+        >
+          {searching ? "Searching..." : "Search"}
+        </button>
+
+        {error && <p style={{ fontSize: 12.5, color: C.red, textAlign: "center", padding: "8px 0 16px" }}>{error}</p>}
+
+        {searching && <p style={{ fontSize: 13, color: C.steel, textAlign: "center", padding: "24px 0" }}>Searching...</p>}
+
+        {!searching && searched && results.length === 0 && (
+          <div className="empty">
+            <div className="empty-icon"><Icon.Users2 /></div>
+            <div className="empty-title">No results</div>
+            <div className="empty-sub">Try a different username or email.</div>
+          </div>
+        )}
+
+        {!searching && results.map(r => {
+          const involved = alreadyInvolved.has(r.id) || invitedIds.includes(r.id);
+          return (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 8 }}>
+              <PersonAvatar person={r} size={44} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>{r.name}</div>
+                <div style={{ fontSize: 12, color: C.steel }}>@{r.username}</div>
+              </div>
+              {involved ? (
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#1B7A3D", flexShrink: 0 }}>
+                  {event.participantIds?.includes(r.id) ? "In event" : "Invited"}
+                </span>
+              ) : (
+                <button
+                  onClick={() => invite(r)}
+                  aria-label="Invite"
+                  style={{ width: 34, height: 34, borderRadius: "50%", border: `1.5px solid ${C.black}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, padding: 0 }}
+                >
+                  <div style={{ width: 16, height: 16, color: C.black }}><Icon.Plus /></div>
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
