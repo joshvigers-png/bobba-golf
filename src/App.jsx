@@ -6331,17 +6331,41 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
     return h;
   });
 
-  // Flat list of every game across every day, with a stable combined key
+  // Flat list of every session (day.games entry) across every day
   const allGames = (event.days || []).flatMap(day => day.games.map(g => ({ ...g, dayId: day.id, dayLabel: day.label })));
-  const [matches, setMatches] = useState(() => {
-    const existing = {};
-    (event.matches || []).forEach(m => { existing[`${m.dayId}_${m.gameId}`] = m; });
-    return allGames.reduce((acc, g) => {
-      const key = `${g.dayId}_${g.id}`;
-      acc[key] = existing[key] || { dayId: g.dayId, gameId: g.id, team1PlayerIds: [], team2PlayerIds: [], scorerId: "" };
-      return acc;
-    }, {});
-  });
+
+  // Matches are generated, not manually added — the number needed per
+  // session is worked out from the real team size once it's known (Pairs:
+  // team size ÷ 2 matches of 2v2; Singles: one 1v1 match per player). This
+  // mirrors how a real tee sheet gets built once you know who's actually
+  // playing, rather than guessing a game count back at Step 1.
+  const [matches, setMatches] = useState({});
+
+  const generateMatchSlots = () => {
+    // Prefer whatever's already been entered in this session over what was
+    // last saved to Firestore, so going back a step to fix a team then
+    // forward again doesn't wipe out pairing work already done.
+    const existing = { ...matches };
+    (event.matches || []).forEach(m => {
+      const key = `${m.dayId}_${m.gameId}_${m.matchIndex}`;
+      if (!existing[key]) existing[key] = m;
+    });
+    const next = {};
+    allGames.forEach(g => {
+      const slotsPerSide = g.groupType === "pairs" ? 2 : 1;
+      const numMatches = g.groupType === "pairs" ? Math.floor(team1Players.length / 2) : team1Players.length;
+      for (let i = 0; i < numMatches; i++) {
+        const key = `${g.dayId}_${g.id}_${i}`;
+        next[key] = existing[key] || {
+          dayId: g.dayId, gameId: g.id, matchIndex: i,
+          team1PlayerIds: Array(slotsPerSide).fill(""),
+          team2PlayerIds: Array(slotsPerSide).fill(""),
+          scorerId: "",
+        };
+      }
+    });
+    setMatches(next);
+  };
 
   const nameOf = (id) => allParticipants.find(p => p.id === id)?.name || "—";
   const team1Players = allParticipants.filter(p => assignments[p.id] === "team1");
@@ -6383,6 +6407,9 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
     setError("");
     if (unassigned.length > 0) { setError(`${unassigned.length} player${unassigned.length !== 1 ? "s" : ""} still need a team.`); return; }
     if (team1Players.length === 0 || team2Players.length === 0) { setError("Both teams need at least one player."); return; }
+    if (team1Players.length !== team2Players.length) { setError(`Teams need to be even for fair matches — ${team1Name} has ${team1Players.length}, ${team2Name} has ${team2Players.length}.`); return; }
+    if (allGames.some(g => g.groupType === "pairs") && team1Players.length % 2 !== 0) { setError("Pairs format needs an even number of players per team."); return; }
+    generateMatchSlots();
     setStep("pairings");
   };
 
@@ -6503,47 +6530,73 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
         {step === "pairings" && (
           <>
             <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 16 }}>
-              For each game, choose who's facing whom and who'll be entering the scores.
+              Choose who's facing whom for each match, and who'll be entering the scores.
             </p>
             {allGames.map(g => {
-              const key = `${g.dayId}_${g.id}`;
-              const match = matches[key];
               const grp = RYDER_CUP_GROUP_TYPES.find(f => f.id === g.groupType);
               const fmt = RYDER_CUP_FORMATS.find(f => f.id === g.format);
               const slotCount = g.groupType === "pairs" ? 2 : 1;
-              const matchPlayerIds = [...match.team1PlayerIds, ...match.team2PlayerIds].filter(Boolean);
+              const numMatches = g.groupType === "pairs" ? Math.floor(team1Players.length / 2) : team1Players.length;
+              const sessionMatches = Array.from({ length: numMatches }, (_, i) => ({ i, key: `${g.dayId}_${g.id}_${i}`, match: matches[`${g.dayId}_${g.id}_${i}`] })).filter(x => x.match);
+
               return (
-                <div key={key} className="panel" style={{ padding: "14px 16px", marginBottom: 14 }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{g.dayLabel}</div>
-                  <div style={{ fontSize: 11, color: C.steel, marginBottom: 12 }}>{grp?.label} · {fmt?.label}</div>
+                <div key={`${g.dayId}_${g.id}`} style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 2 }}>{g.dayLabel}</div>
+                  <div style={{ fontSize: 11, color: C.steel, marginBottom: 12 }}>
+                    {grp?.label} · {fmt?.label} · {numMatches} match{numMatches !== 1 ? "es" : ""}
+                    {g.groupType === "singles" && numMatches > 1 ? ` (typically ${Math.ceil(numMatches / 2)} groups of 4 on the course)` : ""}
+                  </div>
 
-                  {[["team1PlayerIds", team1Name, team1Players], ["team2PlayerIds", team2Name, team2Players]].map(([side, label, pool]) => (
-                    <div key={side} style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{label}</div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        {Array.from({ length: slotCount }).map((_, slotIdx) => (
-                          <select
-                            key={slotIdx}
-                            className="input"
-                            style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
-                            value={match[side][slotIdx] || ""}
-                            onChange={e => setMatchSlot(key, side, slotIdx, e.target.value)}
-                          >
+                  {sessionMatches.map(({ i, key, match }) => {
+                    const matchPlayerIds = [...match.team1PlayerIds, ...match.team2PlayerIds].filter(Boolean);
+                    // Purely visual — every 2 singles matches shown together
+                    // under one "Group" label, since that's typically one
+                    // physical foursome on the course even though each is
+                    // still its own independent 1v1 result.
+                    const showGroupLabel = g.groupType === "singles" && i % 2 === 0;
+                    return (
+                      <div key={key}>
+                        {showGroupLabel && (
+                          <div style={{ fontSize: 9.5, fontWeight: 800, color: C.ash, textTransform: "uppercase", letterSpacing: ".05em", margin: "10px 0 6px" }}>
+                            Group {Math.floor(i / 2) + 1}
+                          </div>
+                        )}
+                        <div className="panel" style={{ padding: "14px 16px", marginBottom: 10 }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 800, color: C.steel, marginBottom: 10 }}>
+                            {g.groupType === "pairs" ? `Match ${i + 1}` : `Match ${i + 1} of ${numMatches}`}
+                          </div>
+
+                          {[["team1PlayerIds", team1Name, team1Players], ["team2PlayerIds", team2Name, team2Players]].map(([side, label, pool]) => (
+                            <div key={side} style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{label}</div>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                {Array.from({ length: slotCount }).map((_, slotIdx) => (
+                                  <select
+                                    key={slotIdx}
+                                    className="input"
+                                    style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
+                                    value={match[side][slotIdx] || ""}
+                                    onChange={e => setMatchSlot(key, side, slotIdx, e.target.value)}
+                                  >
+                                    <option value="">Select…</option>
+                                    {pool.map(p => (
+                                      <option key={p.id} value={p.id} disabled={matchPlayerIds.includes(p.id) && match[side][slotIdx] !== p.id}>{p.name}</option>
+                                    ))}
+                                  </select>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+
+                          <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Scorer</div>
+                          <select className="input" style={{ padding: "9px 8px", fontSize: 12.5 }} value={match.scorerId} onChange={e => setMatchScorer(key, e.target.value)}>
                             <option value="">Select…</option>
-                            {pool.map(p => (
-                              <option key={p.id} value={p.id} disabled={matchPlayerIds.includes(p.id) && match[side][slotIdx] !== p.id}>{p.name}</option>
-                            ))}
+                            {matchPlayerIds.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
                           </select>
-                        ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-
-                  <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Scorer</div>
-                  <select className="input" style={{ padding: "9px 8px", fontSize: 12.5 }} value={match.scorerId} onChange={e => setMatchScorer(key, e.target.value)}>
-                    <option value="">Select…</option>
-                    {matchPlayerIds.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
-                  </select>
+                    );
+                  })}
                 </div>
               );
             })}
