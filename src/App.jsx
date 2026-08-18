@@ -244,6 +244,28 @@ const DB = {
     const participants = accept ? [...(event.participantIds || []), uid] : (event.participantIds || []);
     await DB.updateRyderCupEvent(eventId, { pendingInvites: pending, participantIds: participants });
   },
+  // Step 6 — starting the round. Creates one shared scoring record per
+  // match, in its own subcollection (not the event doc itself, which stays
+  // small and host-only-writable) so a future scorer can write to just
+  // their own match without needing broad access to the whole event.
+  // Step 6 — starting a specific DAY's round (not the whole multi-day event
+  // at once, since a real Ryder Cup often plays different courses, or even
+  // different actual dates, per day). Creates one shared scoring record per
+  // match on that day, in its own subcollection (not the event doc itself,
+  // which stays small and host-only-writable) so a future scorer can write
+  // to just their own match without needing broad access to the whole event.
+  startRyderCupDay: async (eventId, dayId, course, matchKeys) => {
+    const event = await DB.getRyderCupEvent(eventId);
+    const dayCourses = { ...(event?.dayCourses || {}), [dayId]: course };
+    const dayStatus = { ...(event?.dayStatus || {}), [dayId]: "live" };
+    await DB.updateRyderCupEvent(eventId, { dayCourses, dayStatus });
+    await Promise.all(matchKeys.map(key =>
+      setDoc(doc(db, "rydercup_events", eventId, "live_scores", key), {
+        scores: {}, status: "in_progress", createdAt: Date.now(),
+      })
+    ));
+    return { dayCourses, dayStatus };
+  },
 };
 
 // ─── Firestore sync helpers ──────────────────────────────────────────────────
@@ -5629,6 +5651,8 @@ function RyderCupHome({ user, onBack }) {
   const [guestName, setGuestName] = useState("");
   const [guestHandicap, setGuestHandicap] = useState("");
   const [teamsFlowOpen, setTeamsFlowOpen] = useState(false);
+  const [startRoundOpen, setStartRoundOpen] = useState(false);
+  const [startingRound, setStartingRound] = useState(false);
   const [respondingId, setRespondingId] = useState(null);
   const [playerProfiles, setPlayerProfiles] = useState([]); // resolved profiles for the active event's people
 
@@ -5962,6 +5986,64 @@ function RyderCupHome({ user, onBack }) {
             allPlayers={playerProfiles}
             onClose={() => setTeamsFlowOpen(false)}
             onSaved={(updated) => { setActiveEvent(ev => ({ ...ev, ...updated })); setTeamsFlowOpen(false); }}
+          />
+        )}
+
+        {(activeEvent.matches || []).length > 0 && (
+          <>
+            <div className="section-head"><span className="section-title">Rounds</span></div>
+            <div style={{ margin: "0 18px 18px" }}>
+              {(activeEvent.days || []).map(day => {
+                const dayStatus = activeEvent.dayStatus?.[day.id] || "pending";
+                const dayCourse = activeEvent.dayCourses?.[day.id];
+                const dayHasMatches = (activeEvent.matches || []).some(m => m.dayId === day.id);
+                if (!dayHasMatches) return null;
+                return (
+                  <div key={day.id} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: C.steel, marginBottom: 6 }}>{day.label}</div>
+                    {dayStatus === "live" ? (
+                      <div style={{ padding: "14px 16px", background: C.black, color: C.white }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Round in progress</div>
+                        <div style={{ fontSize: 11.5, opacity: 0.75 }}>{dayCourse?.name}</div>
+                        <p style={{ fontSize: 11, opacity: 0.6, marginTop: 8, lineHeight: 1.5 }}>
+                          Live scoring for each match and the shared leaderboard are coming in the next update — this day's round is officially started and ready for them.
+                        </p>
+                      </div>
+                    ) : dayStatus === "completed" ? (
+                      <div style={{ padding: "14px 16px", background: C.cloud }}>
+                        <div style={{ fontWeight: 800, fontSize: 13 }}>Round completed</div>
+                        <div style={{ fontSize: 11.5, color: C.steel, marginTop: 2 }}>{dayCourse?.name}</div>
+                      </div>
+                    ) : activeEvent.hostUid === user.id ? (
+                      <button className="btn btn-primary" onClick={() => setStartRoundOpen(day.id)}>
+                        Start {day.label} Round
+                      </button>
+                    ) : (
+                      <p style={{ fontSize: 12.5, color: C.steel }}>Waiting for the host to start this day's round.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {startRoundOpen && (
+          <CompCourseFlow
+            onBack={() => setStartRoundOpen(false)}
+            onNext={async (course) => {
+              setStartingRound(true);
+              try {
+                const dayId = startRoundOpen;
+                const matchKeys = (activeEvent.matches || []).filter(m => m.dayId === dayId).map(m => `${m.dayId}_${m.gameId}_${m.matchIndex}`);
+                const { dayCourses, dayStatus } = await DB.startRyderCupDay(activeEvent.id, dayId, course, matchKeys);
+                setActiveEvent(ev => ({ ...ev, dayCourses, dayStatus }));
+                setStartRoundOpen(false);
+              } catch (e) {
+                console.error("Start round error:", e);
+              }
+              setStartingRound(false);
+            }}
           />
         )}
 
@@ -6360,6 +6442,9 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
   const realParticipants = realIds.map(id => allPlayers.find(p => p.id === id)).filter(Boolean);
   const guestParticipants = (event.guestParticipants || []).map(g => ({ id: g.id, name: g.name, handicap: g.handicap, isGuest: true }));
   const allParticipants = [...realParticipants, ...guestParticipants];
+  // Only real, signed-in app users can be a scorer — guests have no way to
+  // log in and enter scores themselves.
+  const realAppUsers = realParticipants;
 
   const existingTeams = event.teams || [];
   const [team1Name, setTeam1Name] = useState(existingTeams[0]?.name || "Team 1");
@@ -6653,8 +6738,15 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
                           <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Scorer</div>
                           <select className="input" style={{ padding: "9px 8px", fontSize: 12.5 }} value={match.scorerId} onChange={e => setMatchScorer(key, e.target.value)}>
                             <option value="">Select…</option>
-                            {matchPlayerIds.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
+                            {realAppUsers.map(p => (
+                              <option key={p.id} value={p.id}>{p.name}{!matchPlayerIds.includes(p.id) ? " (not in this match)" : ""}</option>
+                            ))}
                           </select>
+                          {matchPlayerIds.some(id => (allParticipants.find(p => p.id === id) || {}).isGuest) && (
+                            <p style={{ fontSize: 10, color: C.ash, marginTop: 6, lineHeight: 1.4 }}>
+                              This match includes a guest — pick a real app user (e.g. yourself or their playing partner) to enter scores on their behalf.
+                            </p>
+                          )}
                         </div>
                       </div>
                     );
