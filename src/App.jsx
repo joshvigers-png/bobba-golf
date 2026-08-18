@@ -5875,30 +5875,80 @@ function RyderCupHome({ user, onBack }) {
 
         <div className="section-head"><span className="section-title">Teams & Pairings</span></div>
         <div style={{ margin: "0 18px 18px" }}>
-          {(activeEvent.teams || []).length === 2 ? (
-            <>
-              <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                {activeEvent.teams.map(t => {
-                  const count = (activeEvent.teamAssignments?.[t.id] || []).length;
-                  const captain = playerProfiles.find(p => p.id === t.captainId) || (activeEvent.guestParticipants || []).find(g => g.id === t.captainId);
-                  return (
-                    <div key={t.id} style={{ flex: 1, border: `1.5px solid ${C.black}`, padding: "12px 14px" }}>
-                      <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{t.name}</div>
-                      <div style={{ fontSize: 11, color: C.steel }}>{count} player{count !== 1 ? "s" : ""}</div>
-                      {captain && <div style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>Captain: {captain.name}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 11.5, color: C.steel, marginBottom: 12 }}>
-                {(activeEvent.matches || []).length} match{(activeEvent.matches || []).length !== 1 ? "es" : ""} set up
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 14 }}>
-              Set team names, pick captains, allocate players, then pair them up for each game on the schedule.
-            </p>
-          )}
+          {(() => {
+            const resolvePlayer = (id) => {
+              const real = playerProfiles.find(p => p.id === id);
+              const guest = (activeEvent.guestParticipants || []).find(g => g.id === id);
+              const base = real || guest;
+              if (!base) return { name: "—", handicap: null };
+              const hcp = activeEvent.eventHandicaps?.[id] ?? base.handicap ?? null;
+              return { name: base.name, handicap: hcp };
+            };
+            const daysById = Object.fromEntries((activeEvent.days || []).map(d => [d.id, d]));
+
+            return (activeEvent.teams || []).length === 2 ? (
+              <>
+                <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+                  {activeEvent.teams.map(t => {
+                    const ids = activeEvent.teamAssignments?.[t.id] || [];
+                    return (
+                      <div key={t.id} style={{ flex: 1, border: `1.5px solid ${C.black}`, padding: "12px 14px" }}>
+                        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8 }}>{t.name}</div>
+                        {ids.map(id => {
+                          const p = resolvePlayer(id);
+                          const isCaptain = id === t.captainId;
+                          return (
+                            <div key={id} style={{ fontSize: 11.5, marginBottom: 4, display: "flex", justifyContent: "space-between", gap: 6 }}>
+                              <span style={{ fontWeight: isCaptain ? 800 : 600 }}>{p.name}{isCaptain ? " (C)" : ""}</span>
+                              {p.handicap != null && <span style={{ color: C.steel, flexShrink: 0 }}>{p.handicap.toFixed(1)}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {(activeEvent.matches || []).length > 0 && (() => {
+                  // Group matches by session (day + game), in schedule order
+                  const sessions = [];
+                  (activeEvent.days || []).forEach(day => {
+                    day.games.forEach(g => {
+                      const sessionMatches = (activeEvent.matches || [])
+                        .filter(m => m.dayId === day.id && m.gameId === g.id)
+                        .sort((a, b) => a.matchIndex - b.matchIndex);
+                      if (sessionMatches.length) sessions.push({ day, g, matches: sessionMatches });
+                    });
+                  });
+                  return sessions.map(({ day, g, matches: sm }) => {
+                    const grp = RYDER_CUP_GROUP_TYPES.find(f => f.id === g.groupType);
+                    const fmt = RYDER_CUP_FORMATS.find(f => f.id === g.format);
+                    return (
+                      <div key={`${day.id}_${g.id}`} style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{day.label}</div>
+                        <div style={{ fontSize: 10.5, color: C.steel, marginBottom: 8 }}>{grp?.label} · {fmt?.label}</div>
+                        {sm.map(m => {
+                          const t1 = m.team1PlayerIds.map(resolvePlayer).map(p => p.name).join(" & ");
+                          const t2 = m.team2PlayerIds.map(resolvePlayer).map(p => p.name).join(" & ");
+                          const scorer = m.scorerId ? resolvePlayer(m.scorerId).name : null;
+                          return (
+                            <div key={m.matchIndex} style={{ padding: "10px 12px", background: C.white, border: `1px solid ${C.line}`, marginBottom: 6 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{t1 || "—"} <span style={{ color: C.ash, fontWeight: 600 }}>vs</span> {t2 || "—"}</div>
+                              <div style={{ fontSize: 10.5, color: C.steel, marginTop: 3 }}>Scorer: {scorer || "Not set"}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  });
+                })()}
+              </>
+            ) : (
+              <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 14 }}>
+                Set team names, pick captains, allocate players, then pair them up for each game on the schedule.
+              </p>
+            );
+          })()}
           {activeEvent.hostUid === user.id && (
             <button className="btn btn-primary" onClick={() => setTeamsFlowOpen(true)}>
               {(activeEvent.teams || []).length === 2 ? "Edit Teams & Pairings" : "Set Up Teams & Pairings"}
@@ -6538,6 +6588,10 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
               const slotCount = g.groupType === "pairs" ? 2 : 1;
               const numMatches = g.groupType === "pairs" ? Math.floor(team1Players.length / 2) : team1Players.length;
               const sessionMatches = Array.from({ length: numMatches }, (_, i) => ({ i, key: `${g.dayId}_${g.id}_${i}`, match: matches[`${g.dayId}_${g.id}_${i}`] })).filter(x => x.match);
+              // A player can only be in one match per session (can't
+              // physically play two matches on the same day/session at
+              // once) — used across the WHOLE session, not just one match.
+              const sessionUsedIds = new Set(sessionMatches.flatMap(({ match }) => [...match.team1PlayerIds, ...match.team2PlayerIds].filter(Boolean)));
 
               return (
                 <div key={`${g.dayId}_${g.id}`} style={{ marginBottom: 20 }}>
@@ -6570,20 +6624,28 @@ function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
                             <div key={side} style={{ marginBottom: 10 }}>
                               <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{label}</div>
                               <div style={{ display: "flex", gap: 8 }}>
-                                {Array.from({ length: slotCount }).map((_, slotIdx) => (
-                                  <select
-                                    key={slotIdx}
-                                    className="input"
-                                    style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
-                                    value={match[side][slotIdx] || ""}
-                                    onChange={e => setMatchSlot(key, side, slotIdx, e.target.value)}
-                                  >
-                                    <option value="">Select…</option>
-                                    {pool.map(p => (
-                                      <option key={p.id} value={p.id} disabled={matchPlayerIds.includes(p.id) && match[side][slotIdx] !== p.id}>{p.name}</option>
-                                    ))}
-                                  </select>
-                                ))}
+                                {Array.from({ length: slotCount }).map((_, slotIdx) => {
+                                  const currentValue = match[side][slotIdx] || "";
+                                  // Available = not used anywhere else in this
+                                  // session, except the player currently sitting
+                                  // in THIS exact slot (so the dropdown still
+                                  // shows their own selection).
+                                  const available = pool.filter(p => p.id === currentValue || !sessionUsedIds.has(p.id));
+                                  return (
+                                    <select
+                                      key={slotIdx}
+                                      className="input"
+                                      style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
+                                      value={currentValue}
+                                      onChange={e => setMatchSlot(key, side, slotIdx, e.target.value)}
+                                    >
+                                      <option value="">Select…</option>
+                                      {available.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                      ))}
+                                    </select>
+                                  );
+                                })}
                               </div>
                             </div>
                           ))}
