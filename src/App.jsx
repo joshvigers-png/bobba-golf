@@ -5537,16 +5537,19 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
 // Reuses the same search + scan pattern as Play a Round
 // ─── Ryder Cup ────────────────────────────────────────────────────────────────
 // Step 1 of the Ryder Cup build: create the event shell (name, days, games
-// per day, format per game). Team selection, invites, pairings and live
-// scoring are separate steps to be layered on top of this in future builds.
+// per day, grouping + format per game). Team selection, invites, pairings
+// and live scoring are separate steps to be layered on top of this.
+const RYDER_CUP_GROUP_TYPES = [
+  { id: "singles", label: "Singles", desc: "1 vs 1" },
+  { id: "pairs",   label: "Pairs", desc: "2 vs 2" },
+];
 const RYDER_CUP_FORMATS = [
-  { id: "foursomes", label: "Foursomes", sub: "Alternate shot, 2v2" },
-  { id: "fourballs", label: "Fourballs", sub: "Best ball, 2v2" },
-  { id: "singles",   label: "Singles", sub: "1v1" },
+  { id: "matchplay", label: "Match Play", desc: "Hole by hole — most holes won wins" },
+  { id: "stroke",    label: "Stroke Play", desc: "Lowest total gross score wins" },
 ];
 
 function newRyderCupDay(n) {
-  return { id: `day_${Date.now()}_${n}`, label: `Day ${n}`, games: [{ id: `game_${Date.now()}_0`, format: "foursomes" }] };
+  return { id: `day_${Date.now()}_${n}`, label: `Day ${n}`, games: [{ id: `game_${Date.now()}_0`, groupType: "singles", format: "matchplay" }] };
 }
 
 function RyderCupHome({ user, onBack }) {
@@ -5682,11 +5685,12 @@ function RyderCupHome({ user, onBack }) {
           <div key={day.id} className="panel" style={{ margin: "0 18px 12px", padding: "14px 16px" }}>
             <div style={{ fontWeight: 800, fontSize: 13.5, marginBottom: 8 }}>{day.label}</div>
             {day.games.map((g, gi) => {
+              const grp = RYDER_CUP_GROUP_TYPES.find(f => f.id === g.groupType);
               const fmt = RYDER_CUP_FORMATS.find(f => f.id === g.format);
               return (
                 <div key={g.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: gi > 0 ? `1px solid ${C.line}` : "none" }}>
                   <span style={{ fontSize: 12.5 }}>Game {gi + 1}</span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: C.steel }}>{fmt?.label}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: C.steel }}>{grp?.label} · {fmt?.label}</span>
                 </div>
               );
             })}
@@ -5920,12 +5924,15 @@ function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
   const removeDay = (dayId) => setDays(d => d.length > 1 ? d.filter(x => x.id !== dayId) : d);
 
   const addGame = (dayId) => setDays(d => d.map(day =>
-    day.id === dayId ? { ...day, games: [...day.games, { id: `game_${Date.now()}`, format: "foursomes" }] } : day
+    day.id === dayId ? { ...day, games: [...day.games, { id: `game_${Date.now()}`, groupType: "singles", format: "matchplay" }] } : day
   ));
   const removeGame = (dayId, gameId) => setDays(d => d.map(day =>
     day.id === dayId
       ? { ...day, games: day.games.length > 1 ? day.games.filter(g => g.id !== gameId) : day.games }
       : day
+  ));
+  const setGameGroupType = (dayId, gameId, groupType) => setDays(d => d.map(day =>
+    day.id === dayId ? { ...day, games: day.games.map(g => g.id === gameId ? { ...g, groupType } : g) } : day
   ));
   const setGameFormat = (dayId, gameId, format) => setDays(d => d.map(day =>
     day.id === dayId ? { ...day, games: day.games.map(g => g.id === gameId ? { ...g, format } : g) } : day
@@ -5999,8 +6006,8 @@ function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
             </div>
 
             {day.games.map((g, gi) => (
-              <div key={g.id} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <div key={g.id} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em" }}>Game {gi + 1}</span>
                   {day.games.length > 1 && (
                     <button onClick={() => removeGame(day.id, g.id)} style={{ background: "none", border: "none", color: C.red, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>
@@ -6008,22 +6015,31 @@ function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
                     </button>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {RYDER_CUP_FORMATS.map(fmt => (
+
+                <div style={{ fontSize: 9.5, fontWeight: 800, color: C.ash, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Grouping</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  {RYDER_CUP_GROUP_TYPES.map(grp => (
                     <button
-                      key={fmt.id}
-                      onClick={() => setGameFormat(day.id, g.id, fmt.id)}
-                      style={{
-                        flex: "1 1 30%", padding: "10px 8px", border: `1.5px solid ${g.format === fmt.id ? C.black : C.line}`,
-                        background: g.format === fmt.id ? C.black : C.white, color: g.format === fmt.id ? C.white : C.black,
-                        cursor: "pointer", textAlign: "center",
-                      }}
+                      key={grp.id}
+                      onClick={() => setGameGroupType(day.id, g.id, grp.id)}
+                      style={{ flex: 1, padding: "10px 0", fontWeight: 800, fontSize: 13, border: `1.5px solid ${g.groupType === grp.id ? C.black : C.line}`, background: g.groupType === grp.id ? C.black : C.white, color: g.groupType === grp.id ? C.white : C.black, cursor: "pointer" }}
                     >
-                      <div style={{ fontSize: 12, fontWeight: 800 }}>{fmt.label}</div>
-                      <div style={{ fontSize: 9.5, marginTop: 2, opacity: 0.8 }}>{fmt.sub}</div>
+                      {grp.label}
+                      <div style={{ fontSize: 9.5, fontWeight: 600, marginTop: 2, opacity: 0.8 }}>{grp.desc}</div>
                     </button>
                   ))}
                 </div>
+
+                <div style={{ fontSize: 9.5, fontWeight: 800, color: C.ash, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Format</div>
+                {RYDER_CUP_FORMATS.map(fmt => (
+                  <div key={fmt.id} onClick={() => setGameFormat(day.id, g.id, fmt.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 6, border: `1.5px solid ${g.format === fmt.id ? C.black : C.line}`, background: g.format === fmt.id ? C.black : C.white, cursor: "pointer" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 800, fontSize: 12.5, color: g.format === fmt.id ? C.white : C.black }}>{fmt.label}</div>
+                      <div style={{ fontSize: 10.5, color: g.format === fmt.id ? "rgba(255,255,255,.6)" : C.steel, marginTop: 1 }}>{fmt.desc}</div>
+                    </div>
+                    {g.format === fmt.id && <div style={{ width: 16, height: 16, color: C.white, flexShrink: 0 }}><Icon.Check /></div>}
+                  </div>
+                ))}
               </div>
             ))}
 
