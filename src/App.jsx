@@ -4810,57 +4810,57 @@ function BagScreen({ user, onUpdateUser, onBack }) {
 
 // ─── Handicap trend line chart (SVG, no library) ─────────────────────────────
 function HandicapChart({ points }) {
-  // points: [{ value, date, courseName }] — one per submitted round, sorted
-  // oldest → newest BY ROUND DATE (the caller sorts by date explicitly,
-  // since submission order and the actual date played aren't always the
-  // same thing if a round gets logged into the app after the fact).
-  // `value` is the handicap the person was PLAYING OFF on that round's
-  // date (round.handicapPlayed), not the resulting index — this is what
-  // lets the chart show round-to-round consistency rather than only "how
-  // my official index changed over time".
+  // points: [{ before, after, date, courseName }] — one per submitted round,
+  // sorted oldest → newest BY ROUND DATE. `before` is what the person was
+  // playing off entering that round (round.handicapPlayed); `after` is the
+  // resulting index once that round counted (from handicapHistory). Plotting
+  // both together tells the actual story per round — "played off X, shot a
+  // score that moved me to Y" — without needing a separate current-index
+  // callout, since the after-line's last point always IS the live index.
   if (points.length < 2) return null;
 
-  // Taller canvas than before, with extra top/bottom room specifically to
-  // fit the handicap value printed directly above/below each point.
-  const W = 320, H = 180, padX = 18, padTop = 30, padBottom = 46;
-  const values = points.map(p => p.value);
-  const minV = Math.min(...values), maxV = Math.max(...values);
-  const range = Math.max(0.5, maxV - minV); // avoid a flat-zero range
+  const W = 320, H = 180, padX = 18, padTop = 26, padBottom = 46;
+  const allValues = points.flatMap(p => [p.before, p.after]).filter(v => v != null);
+  const minV = Math.min(...allValues), maxV = Math.max(...allValues);
+  const range = Math.max(0.5, maxV - minV);
   const yFor = (v) => H - padBottom - ((v - minV) / range) * (H - padTop - padBottom);
   const xFor = (i) => points.length === 1 ? W / 2 : padX + (i / (points.length - 1)) * (W - padX * 2);
 
-  const coords = points.map((p, i) => ({ x: xFor(i), y: yFor(p.value), v: p.value, date: p.date }));
+  const beforeCoords = points.map((p, i) => p.before != null ? { x: xFor(i), y: yFor(p.before), v: p.before, i } : null);
+  const afterCoords = points.map((p, i) => p.after != null ? { x: xFor(i), y: yFor(p.after), v: p.after, i } : null);
 
-  // Build one path segment per consecutive pair, coloured by direction:
-  // a DECREASE in handicap (improvement) is green, an INCREASE is red.
-  const segments = [];
-  for (let i = 0; i < coords.length - 1; i++) {
-    const a = coords[i], b = coords[i + 1];
-    const improving = b.v <= a.v; // lower handicap = better
-    segments.push({ a, b, color: improving ? "#1B7A3D" : "#C8392D" });
-  }
+  // Only connect consecutive points that both actually have data — an older
+  // round with no recorded handicapPlayed, or one predating handicapHistory
+  // tracking, just leaves a gap rather than a misleading straight line.
+  const buildSegments = (coords, colored) => {
+    const segs = [];
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = coords[i], b = coords[i + 1];
+      if (!a || !b) continue;
+      const improving = b.v <= a.v;
+      segs.push({ a, b, color: colored ? (improving ? "#1B7A3D" : "#C8392D") : C.fog });
+    }
+    return segs;
+  };
+  const afterSegments = buildSegments(afterCoords, true);
+  const beforeSegments = buildSegments(beforeCoords, false);
 
-  const first = points[0], last = points[points.length - 1];
-  const overallImproving = last.value <= first.value;
+  const afterPoints = points.filter(p => p.after != null);
+  const first = afterPoints[0], last = afterPoints[afterPoints.length - 1];
+  const overallImproving = first && last ? last.after <= first.after : false;
 
-  // Avoid crowding the x-axis with a date under every single point once
-  // there are more than ~6 rounds — show a thinned-out set of labels
-  // (first, last, and evenly spaced ones in between) while every point
-  // still gets its own marker AND its own value label on the line itself.
   const maxLabels = 6;
   const labelStep = Math.max(1, Math.ceil(points.length / maxLabels));
   const shortDate = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
-  // Decide whether each point's value label sits above or below the dot:
-  // a "peak" (higher than both neighbours, or the highest point overall)
-  // gets its label above; a "trough" gets it below; this keeps the number
-  // from colliding with the line itself as it rises and falls.
-  const labelAbove = coords.map((c, i) => {
-    const prev = coords[i - 1], next = coords[i + 1];
-    if (!prev) return next ? c.v >= next.v : true; // first point: above unless the line immediately rises
-    if (!next) return c.v >= prev.v; // last point: above if the line was rising into it
-    // Local peak (higher value = lower y, since SVG y grows downward) → label above.
-    // Local trough → label below. A straight run defaults to above.
+  // Label placement for the (primary) after-line points only — the before
+  // line intentionally stays unlabelled to avoid crowding two numbers onto
+  // every point on a small mobile chart.
+  const labelAbove = afterCoords.map((c, i) => {
+    if (!c) return true;
+    const prev = afterCoords[i - 1], next = afterCoords[i + 1];
+    if (!prev) return next ? c.v >= next.v : true;
+    if (!next) return c.v >= prev.v;
     return c.v >= prev.v || c.v >= next.v;
   });
 
@@ -4869,37 +4869,48 @@ function HandicapChart({ points }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: 14, color: C.black }}>Handicap Consistency</div>
-          <div style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>Handicap played, by round date — {points.length} round{points.length!==1?"s":""}</div>
+          <div style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>Before and after each round — {points.length} round{points.length!==1?"s":""}</div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div className="mono" style={{ fontWeight: 900, fontSize: 20, color: C.black }}>{last.value.toFixed(1)}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 2 }}>
-            <div style={{ width: 11, height: 11, color: overallImproving ? "#1B7A3D" : "#C8392D" }}>
-              {overallImproving ? <Icon.TrendDown /> : <Icon.TrendUp />}
-            </div>
-            <span style={{ fontSize: 10.5, fontWeight: 800, color: overallImproving ? "#1B7A3D" : "#C8392D" }}>
-              {Math.abs(last.value - first.value).toFixed(1)} {overallImproving ? "lower" : "higher"}
-            </span>
+        {last && (
+          <div style={{ textAlign: "right" }}>
+            <div className="mono" style={{ fontWeight: 900, fontSize: 20, color: C.black }}>{last.after.toFixed(1)}</div>
+            <div style={{ fontSize: 9, color: C.steel, marginTop: -2, marginBottom: 2 }}>current index</div>
+            {first && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 2 }}>
+                <div style={{ width: 11, height: 11, color: overallImproving ? "#1B7A3D" : "#C8392D" }}>
+                  {overallImproving ? <Icon.TrendDown /> : <Icon.TrendUp />}
+                </div>
+                <span style={{ fontSize: 10.5, fontWeight: 800, color: overallImproving ? "#1B7A3D" : "#C8392D" }}>
+                  {Math.abs(last.after - first.after).toFixed(1)} {overallImproving ? "lower" : "higher"}
+                </span>
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        {/* baseline grid */}
         <line x1={padX} y1={H-padBottom} x2={W-padX} y2={H-padBottom} stroke={C.line} strokeWidth="1" />
-        {/* coloured segments */}
-        {segments.map((seg, i) => (
-          <line key={i} x1={seg.a.x} y1={seg.a.y} x2={seg.b.x} y2={seg.b.y} stroke={seg.color} strokeWidth="2.4" strokeLinecap="round" />
+
+        {/* "Before" line — dashed, neutral grey, no value labels */}
+        {beforeSegments.map((seg, i) => (
+          <line key={`b${i}`} x1={seg.a.x} y1={seg.a.y} x2={seg.b.x} y2={seg.b.y} stroke={seg.color} strokeWidth="1.6" strokeDasharray="3,3" strokeLinecap="round" />
         ))}
-        {/* point markers */}
-        {coords.map((c, i) => (
-          <circle key={i} cx={c.x} cy={c.y} r={i===coords.length-1 ? 4 : 2.6}
-            fill={i===coords.length-1 ? C.black : C.white}
-            stroke={i===0 ? C.steel : (segments[i-1]?.color || C.steel)}
+        {beforeCoords.map((c, i) => c && (
+          <circle key={`bp${i}`} cx={c.x} cy={c.y} r="2.2" fill={C.white} stroke={C.fog} strokeWidth="1.4" />
+        ))}
+
+        {/* "After" line — primary, coloured by improvement, with value labels */}
+        {afterSegments.map((seg, i) => (
+          <line key={`a${i}`} x1={seg.a.x} y1={seg.a.y} x2={seg.b.x} y2={seg.b.y} stroke={seg.color} strokeWidth="2.4" strokeLinecap="round" />
+        ))}
+        {afterCoords.map((c, i) => c && (
+          <circle key={`ap${i}`} cx={c.x} cy={c.y} r={i===afterCoords.length-1 ? 4 : 2.6}
+            fill={i===afterCoords.length-1 ? C.black : C.white}
+            stroke={afterSegments[i-1]?.color || afterSegments[i]?.color || C.steel}
             strokeWidth="1.6" />
         ))}
-        {/* handicap value printed at every point — above on a peak, below on a trough */}
-        {coords.map((c, i) => (
+        {afterCoords.map((c, i) => c && (
           <text
             key={`v${i}`} x={c.x} y={labelAbove[i] ? c.y - 9 : c.y + 15}
             textAnchor="middle" fontSize="10" fontWeight="800" fill={C.black}
@@ -4907,26 +4918,31 @@ function HandicapChart({ points }) {
             {c.v.toFixed(1)}
           </text>
         ))}
+
         {/* date labels under each (thinned-out) point */}
-        {coords.map((c, i) => {
-          const showLabel = i === 0 || i === coords.length - 1 || i % labelStep === 0;
+        {points.map((p, i) => {
+          const showLabel = i === 0 || i === points.length - 1 || i % labelStep === 0;
           if (!showLabel) return null;
           return (
-            <text key={`d${i}`} x={c.x} y={H - 10} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={C.ash}>
-              {shortDate(c.date)}
+            <text key={`d${i}`} x={xFor(i)} y={H - 10} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={C.ash}>
+              {shortDate(p.date)}
             </text>
           );
         })}
       </svg>
 
-      <div style={{ display: "flex", gap: 14, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+      <div style={{ display: "flex", gap: 12, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ width: 14, height: 0, borderTop: `1.6px dashed ${C.fog}` }} />
+          <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>Entering round</span>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1B7A3D" }} />
-          <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>Decrease (improving)</span>
+          <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>After — improved</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C8392D" }} />
-          <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>Increase</span>
+          <span style={{ fontSize: 10, color: C.steel, fontWeight: 600 }}>After — increased</span>
         </div>
       </div>
     </div>
@@ -6996,10 +7012,11 @@ function PerformanceScreen({ user, onBack }) {
     if (idx > 0) return sortedHcpHistory[idx - 1].value;
     return sortedHcpHistory[0].value;
   };
+  const afterForRound = (round) => sortedHcpHistory.find(h => h.roundId === round.id)?.value ?? null;
   const filteredHistory = [...filtered]
     .sort((a,b) => new Date(a.date) - new Date(b.date))
-    .map(r => ({ value: estimateHandicapPlayed(r), date: r.date, courseName: r.courseName, roundId: r.id }))
-    .filter(p => p.value != null);
+    .map(r => ({ before: estimateHandicapPlayed(r), after: afterForRound(r), date: r.date, courseName: r.courseName, roundId: r.id }))
+    .filter(p => p.before != null || p.after != null);
 
   // ── Bag gap analysis ──
   const bagWithYardage = (user.bag || []).filter(c => (c.summerYardage || c.yardage) && c.category !== "Putter").map(c => ({ ...c, yardage: parseInt(c.summerYardage || c.yardage) })).sort((a,b) => b.yardage - a.yardage);
