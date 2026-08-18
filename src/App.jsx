@@ -5558,6 +5558,9 @@ function RyderCupHome({ user, onBack }) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
+  const [guestFormOpen, setGuestFormOpen] = useState(false);
+  const [guestName, setGuestName] = useState("");
+  const [guestHandicap, setGuestHandicap] = useState("");
   const [respondingId, setRespondingId] = useState(null);
   const [playerProfiles, setPlayerProfiles] = useState([]); // resolved profiles for the active event's people
 
@@ -5693,9 +5696,14 @@ function RyderCupHome({ user, onBack }) {
         <div className="section-head"><span className="section-title">Players</span></div>
         <div style={{ margin: "0 18px 12px" }}>
           {activeEvent.hostUid === user.id && (
-            <button className="btn btn-primary" onClick={() => setInviteSheetOpen(true)} style={{ marginBottom: 12 }}>
-              + Invite Players
-            </button>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button className="btn btn-primary" onClick={() => setInviteSheetOpen(true)} style={{ flex: 1 }}>
+                + Invite Players
+              </button>
+              <button className="btn btn-outline" onClick={() => setGuestFormOpen(true)} style={{ flex: 1 }}>
+                + Guest Player
+              </button>
+            </div>
           )}
           {[activeEvent.hostUid, ...(activeEvent.participantIds || []).filter(id => id !== activeEvent.hostUid)].map(id => {
             const p = playerProfiles.find(pp => pp.id === id);
@@ -5705,7 +5713,7 @@ function RyderCupHome({ user, onBack }) {
                 <PersonAvatar person={p} size={36} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}{id === activeEvent.hostUid ? " (Host)" : ""}</div>
-                  <div style={{ fontSize: 11, color: C.steel }}>@{p.username}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>@{p.username}{p.handicap != null ? ` · HCP ${p.handicap.toFixed(1)}` : ""}</div>
                 </div>
                 <span style={{ fontSize: 10.5, fontWeight: 800, color: "#1B7A3D", textTransform: "uppercase", letterSpacing: ".04em" }}>Joined</span>
               </div>
@@ -5725,7 +5733,67 @@ function RyderCupHome({ user, onBack }) {
               </div>
             );
           })}
+          {(activeEvent.guestParticipants || []).map(g => (
+            <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.line}` }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, color: C.steel, flexShrink: 0 }}>
+                {g.name?.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 13 }}>{g.name}</div>
+                <div style={{ fontSize: 11, color: C.steel }}>{g.handicap != null ? `HCP ${parseFloat(g.handicap).toFixed(1)}` : "No handicap set"}</div>
+              </div>
+              <span style={{ fontSize: 10.5, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".04em", marginRight: activeEvent.hostUid === user.id ? 10 : 0 }}>Guest</span>
+              {activeEvent.hostUid === user.id && (
+                <button
+                  onClick={async () => {
+                    const next = (activeEvent.guestParticipants || []).filter(x => x.id !== g.id);
+                    await DB.updateRyderCupEvent(activeEvent.id, { guestParticipants: next });
+                    setActiveEvent(ev => ({ ...ev, guestParticipants: next }));
+                  }}
+                  style={{ width: 28, height: 28, borderRadius: "50%", border: "none", background: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
+                >
+                  <div style={{ width: 14, height: 14, color: C.red }}><Icon.X /></div>
+                </button>
+              )}
+            </div>
+          ))}
         </div>
+
+        {guestFormOpen && (
+          <div className="sheet-overlay" onClick={() => setGuestFormOpen(false)}>
+            <div className="sheet" onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+              <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 6 }}>Add Guest Player</div>
+              <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 18 }}>
+                For anyone taking part without a Bobba Golf account — useful for testing, or a real guest who isn't on the app yet.
+              </p>
+              <div className="field">
+                <label className="field-label">Name</label>
+                <input className="input" placeholder="e.g. Test Player 1" value={guestName} onChange={e => setGuestName(e.target.value)} />
+              </div>
+              <div className="field" style={{ marginBottom: 20 }}>
+                <label className="field-label">Handicap <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— optional, can be set later</span></label>
+                <input className="input" type="number" step="0.1" placeholder="e.g. 14.2" value={guestHandicap} onChange={e => setGuestHandicap(e.target.value)} />
+              </div>
+              <button
+                className="btn btn-primary"
+                disabled={!guestName.trim()}
+                style={{ opacity: guestName.trim() ? 1 : 0.5, marginBottom: 10 }}
+                onClick={async () => {
+                  const guest = { id: `guest_${Date.now()}`, name: guestName.trim(), handicap: guestHandicap ? parseFloat(guestHandicap) : null };
+                  const next = [...(activeEvent.guestParticipants || []), guest];
+                  await DB.updateRyderCupEvent(activeEvent.id, { guestParticipants: next });
+                  setActiveEvent(ev => ({ ...ev, guestParticipants: next }));
+                  setGuestName(""); setGuestHandicap("");
+                  setGuestFormOpen(false);
+                }}
+              >
+                Add Guest Player
+              </button>
+              <button className="btn btn-outline" onClick={() => setGuestFormOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
 
         {inviteSheetOpen && (
           <RyderCupInviteSheet
@@ -5882,6 +5950,7 @@ function RyderCupSetup({ user, onBack, onCreated, existingEvent, onSaved }) {
           hostName: user.name,
           participantIds: [user.id],
           pendingInvites: [],
+          guestParticipants: [],
           teams: [],
           days,
         });
