@@ -2820,11 +2820,15 @@ function WHSInfoSheet({ onClose }) {
             body: "Your index is based on your best differentials, not your average. As you build up more rounds, more of your scores are included — but always the best ones."
           },
           {
-            title: "3. The 0.96 Multiplier",
+            title: "3. Why does my index look lower than I actually play to?",
+            body: "With only a few rounds logged, WHS uses just your single best round to set your index — so it can look unrealistically low compared to what you typically shoot. That's expected, not a mistake: it's showing your best demonstrated potential, not your average game. It becomes far more representative as you log more rounds (by round 9, it's averaging your best 3, not just your best 1)."
+          },
+          {
+            title: "4. The 0.96 Multiplier",
             body: "WHS applies a 0.96 multiplier to the average of your best differentials. This rewards consistent low scoring and means your index is set slightly below your recent best — encouraging you to keep improving."
           },
           {
-            title: "4. Why can my index drop after a bad round?",
+            title: "5. Why can my index drop after a bad round?",
             body: "It can't — a bad round simply won't be one of your best differentials, so it won't factor in. Your index can drop if a new good round enters your best-N pool, or if Recalculate corrects an earlier error."
           },
         ].map(({ title, body }) => (
