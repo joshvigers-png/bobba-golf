@@ -5159,7 +5159,7 @@ function CompetitionScreen({ user, onBack }) {
           </button>
           <div style={{ position: "relative", zIndex: 1 }}>
             <div className="page-head-eyebrow">Competition Mode</div>
-            <h1>Game</h1>
+            <h1>Play with Friends</h1>
           </div>
         </div>
 
@@ -5170,30 +5170,6 @@ function CompetitionScreen({ user, onBack }) {
           <button className="btn btn-outline" onClick={() => setView("history")}>
             View History
           </button>
-        </div>
-
-        {/* Society — Coming Soon */}
-        <div style={{ margin: "0 18px 14px", padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <div style={{ width: 18, height: 18, color: C.ash }}><Icon.ModLounge /></div>
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 13, color: C.steel }}>Society</div>
-            <div style={{ fontSize: 11, color: C.ash }}>Coming soon</div>
-          </div>
-          <div style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", background: C.cloud, color: C.steel, padding: "3px 8px", borderRadius: 20 }}>Soon</div>
-        </div>
-
-        {/* Ryder Cup — Coming Soon */}
-        <div style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <div style={{ width: 18, height: 18, color: C.ash }}><Icon.ModTrophy /></div>
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 13, color: C.steel }}>Ryder Cup</div>
-            <div style={{ fontSize: 11, color: C.ash }}>Create your own team matchplay event</div>
-          </div>
-          <div style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", background: C.cloud, color: C.steel, padding: "3px 8px", borderRadius: 20 }}>Soon</div>
         </div>
 
         {recent.length > 0 && (
@@ -5364,10 +5340,15 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
     { id: 2, name: "", handicap: "" },
   ]);
   const [error, setError] = useState("");
-  // Which player index (into `players`) sits in each pair/slot, for 4-ball
-  // match play specifically — [[pair1 slot0, pair1 slot1], [pair2 slot0, pair2 slot1]].
+  // For 4-ball match play specifically: "pairs" = one 2v2 team match,
+  // "singles" = two independent 1v1 matches happening within the same
+  // physical foursome. Reuses the exact same pairing UI either way — only
+  // the labels and how it's scored differ.
+  const [matchType, setMatchType] = useState("pairs");
+  // Which player index (into `players`) sits in each pair/slot — for
+  // "pairs" this means partners; for "singles" it means who's facing whom.
   // Defaults to entry order, but this is what lets someone actually choose
-  // who's partnered with whom rather than it being silently assumed.
+  // rather than it being silently assumed.
   const [pairs, setPairs] = useState([[0, 1], [2, 3]]);
 
   const setPairSlot = (pairIdx, slotIdx, playerIdx) => {
@@ -5415,6 +5396,7 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
       gameName: gameName.trim(),
       format,
       ballCount,
+      matchType: (format === "matchplay" && ballCount === 4) ? matchType : undefined,
       players: orderedPlayers.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
       sideGames: { nearestPin: false, nearestIn2: false, longestDrive: false },
     });
@@ -5483,27 +5465,53 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
             their team. */}
         {format === "matchplay" && ballCount === 4 && (
           <div className="field" style={{ marginBottom: 20 }}>
-            <label className="field-label">Pairs</label>
+            <label className="field-label">Match Type</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              {[["pairs", "Pairs", "2v2, best ball"], ["singles", "Singles", "2 x 1v1 matches"]].map(([id, label, sub]) => (
+                <button
+                  key={id}
+                  onClick={() => setMatchType(id)}
+                  style={{ flex: 1, padding: "10px 0", fontWeight: 800, fontSize: 13, border: `1.5px solid ${matchType === id ? C.black : C.line}`, background: matchType === id ? C.black : C.white, color: matchType === id ? C.white : C.black, cursor: "pointer" }}
+                >
+                  {label}
+                  <div style={{ fontSize: 9.5, fontWeight: 600, marginTop: 2, opacity: 0.8 }}>{sub}</div>
+                </button>
+              ))}
+            </div>
+
+            <label className="field-label">{matchType === "pairs" ? "Pairs" : "Singles Matches"}</label>
             <p style={{ fontSize: 11, color: C.steel, marginTop: -4, marginBottom: 10, lineHeight: 1.5 }}>
-              Match play with 4 players is pairs vs pairs — best individual net score in each pair wins the hole for that team. Choose who's partnered together.
+              {matchType === "pairs"
+                ? "Match play with 4 players is pairs vs pairs — best individual net score in each pair wins the hole for that team. Choose who's partnered together."
+                : "Two separate 1v1 matches happening within the same foursome, each scored independently. Choose who's facing whom."}
             </p>
             {pairs.map((pair, pairIdx) => (
               <div key={pairIdx} style={{ border: `1.5px solid ${C.line}`, padding: "10px 12px", marginBottom: 8 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>Pair {pairIdx + 1}</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {pair.map((playerIdx, slotIdx) => (
-                    <select
-                      key={slotIdx}
-                      className="input"
-                      style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
-                      value={playerIdx}
-                      onChange={e => setPairSlot(pairIdx, slotIdx, parseInt(e.target.value))}
-                    >
-                      {players.map((p, i) => (
-                        <option key={i} value={i}>{p.name.trim() || `Player ${i + 1}`}</option>
-                      ))}
-                    </select>
-                  ))}
+                <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>
+                  {matchType === "pairs" ? `Pair ${pairIdx + 1}` : `Match ${pairIdx + 1}`}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <select
+                    className="input"
+                    style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
+                    value={pair[0]}
+                    onChange={e => setPairSlot(pairIdx, 0, parseInt(e.target.value))}
+                  >
+                    {players.map((p, i) => (
+                      <option key={i} value={i}>{p.name.trim() || `Player ${i + 1}`}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, color: C.ash, flexShrink: 0 }}>{matchType === "pairs" ? "&" : "vs"}</span>
+                  <select
+                    className="input"
+                    style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
+                    value={pair[1]}
+                    onChange={e => setPairSlot(pairIdx, 1, parseInt(e.target.value))}
+                  >
+                    {players.map((p, i) => (
+                      <option key={i} value={i}>{p.name.trim() || `Player ${i + 1}`}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             ))}
@@ -5697,6 +5705,31 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
           { ...p2, total: p2wins, label: `${p2wins}W ${halved}H ${p1wins}L` },
         ].concat([{ id: "status", name: status + (dormie ? " (Dormie)" : ""), total: 0, label: "", isStatus: true }]);
       }
+      // 4-ball — either pairs (best ball per team) or two independent
+      // singles matches happening within the same foursome
+      if (comp.ballCount === 4 && comp.matchType === "singles") {
+        const subMatch = (a, b) => {
+          let aw = 0, bw = 0, halved = 0;
+          holes.forEach(h => {
+            const n1 = netScore(a, h), n2 = netScore(b, h);
+            if (n1 == null || n2 == null) return;
+            if (n1 < n2) aw++;
+            else if (n2 < n1) bw++;
+            else halved++;
+          });
+          const diff = aw - bw;
+          const status = diff === 0 ? "All Square" : diff > 0 ? `${a.name} ${diff} UP` : `${b.name} ${Math.abs(diff)} UP`;
+          return [
+            { ...a, total: aw, label: `${aw}W ${halved}H ${bw}L` },
+            { ...b, total: bw, label: `${bw}W ${halved}H ${aw}L` },
+            { id: `status-${a.id}-${b.id}`, name: status, total: 0, label: "", isStatus: true },
+          ];
+        };
+        return [
+          ...subMatch(comp.players[0], comp.players[1]),
+          ...subMatch(comp.players[2], comp.players[3]),
+        ];
+      }
       // 4-ball — best ball per pair
       if (comp.ballCount === 4) {
         const team1 = [comp.players[0], comp.players[1]];
@@ -5781,6 +5814,17 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
             if (n1 === n2) return "halved";
             if (player.id === p1.id) return n1 < n2 ? "won" : "lost";
             return n2 < n1 ? "won" : "lost";
+          }
+          if (comp.ballCount === 4 && comp.matchType === "singles") {
+            // Two independent 1v1 matches within the same foursome —
+            // players[0] vs [1], players[2] vs [3]. Each player is judged
+            // only against their own designated opponent.
+            const idx = comp.players.findIndex(p => p.id === player.id);
+            const opponent = comp.players[idx % 2 === 0 ? idx + 1 : idx - 1];
+            const n1 = netScore(player, hole), n2 = netScore(opponent, hole);
+            if (n1 == null || n2 == null) return null;
+            if (n1 === n2) return "halved";
+            return n1 < n2 ? "won" : "lost";
           }
           if (comp.ballCount === 4) {
             const team1 = [comp.players[0], comp.players[1]];
@@ -5897,60 +5941,82 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
         // p1/p2 in the returned shape represent either an individual player
         // or a 2-person team, so every downstream display below (which just
         // reads .name/.id) works unchanged either way. ──
-        const matchResult = (() => {
-          if (comp.format !== "matchplay" || (comp.ballCount !== 2 && comp.ballCount !== 4)) return null;
-          const isTeam = comp.ballCount === 4;
-          const p1 = isTeam
-            ? { id: "team1", name: `${comp.players[0].name} & ${comp.players[1].name}`, members: [comp.players[0], comp.players[1]] }
-            : { id: comp.players[0].id, name: comp.players[0].name, members: [comp.players[0]] };
-          const p2 = isTeam
-            ? { id: "team2", name: `${comp.players[2].name} & ${comp.players[3].name}`, members: [comp.players[2], comp.players[3]] }
-            : { id: comp.players[1].id, name: comp.players[1].name, members: [comp.players[1]] };
-          // Best net within a side, but only once every member of that side
-          // has actually entered a score for the hole.
-          const sideNet = (side, h) => {
-            const nets = side.members.map(m => netScore(m, h));
-            if (nets.some(n => n == null)) return null;
-            return Math.min(...nets);
-          };
-          let p1w = 0, p2w = 0, halved = 0;
-          let closedAtHole = null, closedResult = null;
-          holes.forEach((h, i) => {
-            const n1 = sideNet(p1, h), n2 = sideNet(p2, h);
-            if (n1 == null || n2 == null) return;
-            if (n1 < n2) p1w++;
-            else if (n2 < n1) p2w++;
-            else halved++;
-            // Check if match is already mathematically over
-            const holesLeft = 17 - i; // holes remaining after this one
+        // Match result(s) — an array because 4-ball singles produces TWO
+        // independent match results (one per 1v1 pairing) rather than one.
+        // 2-ball and 4-ball pairs always produce a single-entry array, so
+        // the rendering below can treat every format the same way.
+        const matchResults = (() => {
+          if (comp.format !== "matchplay") return null;
+          const computeSubMatch = (p1, p2) => {
+            const sideNet = (side, h) => {
+              const nets = side.members.map(m => netScore(m, h));
+              if (nets.some(n => n == null)) return null;
+              return Math.min(...nets);
+            };
+            let p1w = 0, p2w = 0, halved = 0;
+            let closedAtHole = null, closedResult = null;
+            holes.forEach((h, i) => {
+              const n1 = sideNet(p1, h), n2 = sideNet(p2, h);
+              if (n1 == null || n2 == null) return;
+              if (n1 < n2) p1w++;
+              else if (n2 < n1) p2w++;
+              else halved++;
+              const holesLeft = 17 - i;
+              const diff = p1w - p2w;
+              if (Math.abs(diff) > holesLeft && !closedAtHole) {
+                closedAtHole = h.n;
+                const holesRem = 18 - h.n;
+                const by = Math.abs(diff);
+                const winner = diff > 0 ? p1.name : p2.name;
+                closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
+              }
+            });
             const diff = p1w - p2w;
-            if (Math.abs(diff) > holesLeft && !closedAtHole) {
-              closedAtHole = h.n;
-              const holesRem = 18 - h.n; // holes left in round
-              const by = Math.abs(diff);
-              const winner = diff > 0 ? p1.name : p2.name;
-              closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
-            }
-          });
-          const diff = p1w - p2w;
-          const allPlayed = holesPlayed === 18;
-          const finalResult = allPlayed && !closedResult
-            ? (diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`)
-            : null;
-          return { p1w, p2w, halved, diff, closedAtHole, closedResult: closedResult || finalResult, p1, p2 };
+            const allPlayed = holesPlayed === 18;
+            const finalResult = allPlayed && !closedResult
+              ? (diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`)
+              : null;
+            return { p1w, p2w, halved, diff, closedAtHole, closedResult: closedResult || finalResult, p1, p2 };
+          };
+          const mkSide = (p) => ({ id: p.id, name: p.name, members: [p] });
+          if (comp.ballCount === 2) {
+            return [computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1]))];
+          }
+          if (comp.ballCount === 4 && comp.matchType === "singles") {
+            return [
+              computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1])),
+              computeSubMatch(mkSide(comp.players[2]), mkSide(comp.players[3])),
+            ];
+          }
+          if (comp.ballCount === 4) {
+            const p1 = { id: "team1", name: `${comp.players[0].name} & ${comp.players[1].name}`, members: [comp.players[0], comp.players[1]] };
+            const p2 = { id: "team2", name: `${comp.players[2].name} & ${comp.players[3].name}`, members: [comp.players[2], comp.players[3]] };
+            return [computeSubMatch(p1, p2)];
+          }
+          return null;
         })();
 
-        // ── Per-hole result for grid colouring — works for both 2-ball
-        // singles and 4-ball pairs. Returns an array of the winning
-        // side's player id(s), "half", or null.
-        const holeWinner = (h) => {
+        // Per-player hole result — works the same way for 2-ball singles,
+        // 4-ball pairs (best ball per team), and 4-ball singles (each
+        // player judged only against their own designated opponent).
+        const holeWinner = (h, player) => {
           if (comp.format !== "matchplay") return null;
           if (comp.ballCount === 2) {
             const [p1, p2] = comp.players;
             const n1 = netScore(p1, h), n2 = netScore(p2, h);
             if (n1 == null || n2 == null) return null;
             if (n1 === n2) return "half";
-            return n1 < n2 ? [p1.id] : [p2.id];
+            const isP1 = player.id === p1.id;
+            if (n1 < n2) return isP1 ? "won" : "lost";
+            return isP1 ? "lost" : "won";
+          }
+          if (comp.ballCount === 4 && comp.matchType === "singles") {
+            const idx = comp.players.findIndex(p => p.id === player.id);
+            const opponent = comp.players[idx % 2 === 0 ? idx + 1 : idx - 1];
+            const n1 = netScore(player, h), n2 = netScore(opponent, h);
+            if (n1 == null || n2 == null) return null;
+            if (n1 === n2) return "half";
+            return n1 < n2 ? "won" : "lost";
           }
           if (comp.ballCount === 4) {
             const team1 = [comp.players[0], comp.players[1]];
@@ -5960,7 +6026,9 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
             if (nets1.some(n => n == null) || nets2.some(n => n == null)) return null;
             const n1 = Math.min(...nets1), n2 = Math.min(...nets2);
             if (n1 === n2) return "half";
-            return n1 < n2 ? team1.map(p => p.id) : team2.map(p => p.id);
+            const onTeam1 = team1.some(p => p.id === player.id);
+            if (n1 < n2) return onTeam1 ? "won" : "lost";
+            return onTeam1 ? "lost" : "won";
           }
           return null;
         };
@@ -6001,10 +6069,10 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
                         const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
                         const pts = playerPts(player, h);
                         const net = netScore(player, h);
-                        const winner = holeWinner(h);
-                        const won = Array.isArray(winner) && winner.includes(player.id);
+                        const winner = holeWinner(h, player);
+                        const won = winner === "won";
                         const half = winner === "half";
-                        const lost = winner && !won && winner !== "half";
+                        const lost = winner === "lost";
                         const cellBg = !gross ? "transparent" : won ? "#1B7A3D" : half ? "#E08A1E" : lost ? "#C8392D" : "transparent";
                         const cellColor = (won || half || lost) && gross ? C.white : C.black;
                         const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
@@ -6036,40 +6104,47 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
             <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
               <div className="sheet-handle" />
 
-              {/* Match result banner */}
-              {matchResult?.closedResult && (
-                <div style={{ margin: "0 16px 14px", padding: "12px 16px", background: C.black, textAlign: "center" }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 4 }}>Result</div>
-                  <div style={{ fontWeight: 900, fontSize: 18, color: C.white }}>{matchResult.closedResult}</div>
-                </div>
-              )}
-
-              {matchResult && !matchResult.closedResult && (
-                <div style={{ margin: "0 16px 14px" }}>
-                  <div style={{ display: "flex", border: `1px solid ${C.line}` }}>
-                    {[matchResult.p1, matchResult.p2].map((p, i) => {
-                      const wins = i === 0 ? matchResult.p1w : matchResult.p2w;
-                      const isLeading = (i === 0 && matchResult.diff > 0) || (i === 1 && matchResult.diff < 0);
-                      return (
-                        <div key={p.id} style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: isLeading ? C.black : C.white, borderRight: `1px solid ${C.line}` }}>
-                          <div style={{ fontWeight: 800, fontSize: 10.5, color: isLeading ? C.white : C.steel, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-                          <div style={{ fontWeight: 900, fontSize: 26, color: isLeading ? C.white : C.black, lineHeight: 1 }}>{wins}</div>
-                          <div style={{ fontSize: 8.5, color: isLeading ? "rgba(255,255,255,.45)" : C.ash, marginTop: 3 }}>holes won</div>
-                        </div>
-                      );
-                    })}
-                    <div style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: C.cloud }}>
-                      <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.ash, marginBottom: 4 }}>Halved</div>
-                      <div style={{ fontWeight: 900, fontSize: 26, color: C.black, lineHeight: 1 }}>{matchResult.halved}</div>
-                      <div style={{ fontSize: 8.5, color: C.ash, marginTop: 3 }}>holes</div>
+              {/* Match result banner(s) — one per sub-match */}
+              {matchResults?.map((mr, mi) => (
+                <div key={mi}>
+                  {mr.closedResult ? (
+                    <div style={{ margin: "0 16px 14px", padding: "12px 16px", background: C.black, textAlign: "center" }}>
+                      <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 4 }}>
+                        {matchResults.length > 1 ? `Match ${mi + 1} Result` : "Result"}
+                      </div>
+                      <div style={{ fontWeight: 900, fontSize: 18, color: C.white }}>{mr.closedResult}</div>
                     </div>
-                  </div>
-                  {/* Match status below the boxes */}
-                  <div style={{ textAlign: "center", padding: "8px 0 0", fontSize: 12, fontWeight: 800, color: C.black }}>
-                    {matchResult.diff === 0 ? "All Square" : `${matchResult.diff > 0 ? matchResult.p1.name : matchResult.p2.name} ${Math.abs(matchResult.diff)} UP`}
-                  </div>
+                  ) : (
+                    <div style={{ margin: "0 16px 14px" }}>
+                      {matchResults.length > 1 && (
+                        <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Match {mi + 1}</div>
+                      )}
+                      <div style={{ display: "flex", border: `1px solid ${C.line}` }}>
+                        {[mr.p1, mr.p2].map((p, i) => {
+                          const wins = i === 0 ? mr.p1w : mr.p2w;
+                          const isLeading = (i === 0 && mr.diff > 0) || (i === 1 && mr.diff < 0);
+                          return (
+                            <div key={p.id} style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: isLeading ? C.black : C.white, borderRight: `1px solid ${C.line}` }}>
+                              <div style={{ fontWeight: 800, fontSize: 10.5, color: isLeading ? C.white : C.steel, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                              <div style={{ fontWeight: 900, fontSize: 26, color: isLeading ? C.white : C.black, lineHeight: 1 }}>{wins}</div>
+                              <div style={{ fontSize: 8.5, color: isLeading ? "rgba(255,255,255,.45)" : C.ash, marginTop: 3 }}>holes won</div>
+                            </div>
+                          );
+                        })}
+                        <div style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: C.cloud }}>
+                          <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.ash, marginBottom: 4 }}>Halved</div>
+                          <div style={{ fontWeight: 900, fontSize: 26, color: C.black, lineHeight: 1 }}>{mr.halved}</div>
+                          <div style={{ fontSize: 8.5, color: C.ash, marginTop: 3 }}>holes</div>
+                        </div>
+                      </div>
+                      {/* Match status below the boxes */}
+                      <div style={{ textAlign: "center", padding: "8px 0 0", fontSize: 12, fontWeight: 800, color: C.black }}>
+                        {mr.diff === 0 ? "All Square" : `${mr.diff > 0 ? mr.p1.name : mr.p2.name} ${Math.abs(mr.diff)} UP`}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
 
               {/* Header */}
               <div style={{ padding: "0 16px 10px" }}>
@@ -6136,14 +6211,26 @@ function CompDetailView({ comp, onBack, onResume }) {
     if (!gross) return null;
     return gross - strokesReceived(player.handicap, h.si);
   };
-  const holeWinner = (h) => {
+  // Per-player hole result — see the equivalent function in the live
+  // scoring screen for the full explanation.
+  const holeWinner = (h, player) => {
     if (comp.format !== "matchplay") return null;
     if (comp.ballCount === 2) {
       const [p1, p2] = comp.players;
       const n1 = netScore(p1, h), n2 = netScore(p2, h);
       if (n1 == null || n2 == null) return null;
       if (n1 === n2) return "half";
-      return n1 < n2 ? [p1.id] : [p2.id];
+      const isP1 = player.id === p1.id;
+      if (n1 < n2) return isP1 ? "won" : "lost";
+      return isP1 ? "lost" : "won";
+    }
+    if (comp.ballCount === 4 && comp.matchType === "singles") {
+      const idx = comp.players.findIndex(p => p.id === player.id);
+      const opponent = comp.players[idx % 2 === 0 ? idx + 1 : idx - 1];
+      const n1 = netScore(player, h), n2 = netScore(opponent, h);
+      if (n1 == null || n2 == null) return null;
+      if (n1 === n2) return "half";
+      return n1 < n2 ? "won" : "lost";
     }
     if (comp.ballCount === 4) {
       const team1 = [comp.players[0], comp.players[1]];
@@ -6153,7 +6240,9 @@ function CompDetailView({ comp, onBack, onResume }) {
       if (nets1.some(n => n == null) || nets2.some(n => n == null)) return null;
       const n1 = Math.min(...nets1), n2 = Math.min(...nets2);
       if (n1 === n2) return "half";
-      return n1 < n2 ? team1.map(p => p.id) : team2.map(p => p.id);
+      const onTeam1 = team1.some(p => p.id === player.id);
+      if (n1 < n2) return onTeam1 ? "won" : "lost";
+      return onTeam1 ? "lost" : "won";
     }
     return null;
   };
@@ -6164,43 +6253,54 @@ function CompDetailView({ comp, onBack, onResume }) {
   };
 
   // ── Match play result — 2-ball singles or 4-ball pairs ──
-  const matchResult = (() => {
-    if (comp.format !== "matchplay" || (comp.ballCount !== 2 && comp.ballCount !== 4)) return null;
-    const isTeam = comp.ballCount === 4;
-    const p1 = isTeam
-      ? { id: "team1", name: `${comp.players[0].name} & ${comp.players[1].name}`, members: [comp.players[0], comp.players[1]] }
-      : { id: comp.players[0].id, name: comp.players[0].name, members: [comp.players[0]] };
-    const p2 = isTeam
-      ? { id: "team2", name: `${comp.players[2].name} & ${comp.players[3].name}`, members: [comp.players[2], comp.players[3]] }
-      : { id: comp.players[1].id, name: comp.players[1].name, members: [comp.players[1]] };
-    const sideNet = (side, h) => {
-      const nets = side.members.map(m => netScore(m, h));
-      if (nets.some(n => n == null)) return null;
-      return Math.min(...nets);
-    };
-    let p1w = 0, p2w = 0, halved = 0;
-    let closedResult = null;
-    holes.forEach((h, i) => {
-      const n1 = sideNet(p1, h), n2 = sideNet(p2, h);
-      if (n1 == null || n2 == null) return;
-      if (n1 < n2) p1w++;
-      else if (n2 < n1) p2w++;
-      else halved++;
-      const holesLeft = 17 - i;
+  const matchResults = (() => {
+    if (comp.format !== "matchplay") return null;
+    const computeSubMatch = (p1, p2) => {
+      const sideNet = (side, h) => {
+        const nets = side.members.map(m => netScore(m, h));
+        if (nets.some(n => n == null)) return null;
+        return Math.min(...nets);
+      };
+      let p1w = 0, p2w = 0, halved = 0;
+      let closedResult = null;
+      holes.forEach((h, i) => {
+        const n1 = sideNet(p1, h), n2 = sideNet(p2, h);
+        if (n1 == null || n2 == null) return;
+        if (n1 < n2) p1w++;
+        else if (n2 < n1) p2w++;
+        else halved++;
+        const holesLeft = 17 - i;
+        const diff = p1w - p2w;
+        if (Math.abs(diff) > holesLeft && !closedResult) {
+          const holesRem = 18 - h.n;
+          const by = Math.abs(diff);
+          const winner = diff > 0 ? p1.name : p2.name;
+          closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
+        }
+      });
       const diff = p1w - p2w;
-      if (Math.abs(diff) > holesLeft && !closedResult) {
-        const holesRem = 18 - h.n;
-        const by = Math.abs(diff);
-        const winner = diff > 0 ? p1.name : p2.name;
-        closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
+      const allPlayed = holes.every(h => comp.players.every(p => scores[p.id]?.[h.n]?.strokes));
+      if (allPlayed && !closedResult) {
+        closedResult = diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`;
       }
-    });
-    const diff = p1w - p2w;
-    const allPlayed = holes.every(h => comp.players.every(p => scores[p.id]?.[h.n]?.strokes));
-    if (allPlayed && !closedResult) {
-      closedResult = diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`;
+      return { p1w, p2w, halved, diff, closedResult, p1, p2 };
+    };
+    const mkSide = (p) => ({ id: p.id, name: p.name, members: [p] });
+    if (comp.ballCount === 2) {
+      return [computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1]))];
     }
-    return { p1w, p2w, halved, diff, closedResult, p1, p2 };
+    if (comp.ballCount === 4 && comp.matchType === "singles") {
+      return [
+        computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1])),
+        computeSubMatch(mkSide(comp.players[2]), mkSide(comp.players[3])),
+      ];
+    }
+    if (comp.ballCount === 4) {
+      const p1 = { id: "team1", name: `${comp.players[0].name} & ${comp.players[1].name}`, members: [comp.players[0], comp.players[1]] };
+      const p2 = { id: "team2", name: `${comp.players[2].name} & ${comp.players[3].name}`, members: [comp.players[2], comp.players[3]] };
+      return [computeSubMatch(p1, p2)];
+    }
+    return null;
   })();
 
   const sideGameLabels = { nearestPin: "Nearest the Pin", nearestIn2: "Nearest in 2", longestDrive: "Longest Drive" };
@@ -6234,10 +6334,10 @@ function CompDetailView({ comp, onBack, onResume }) {
                   const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
                   const pts = playerPts(player, h);
                   const net = netScore(player, h);
-                  const winner = holeWinner(h);
-                  const won = Array.isArray(winner) && winner.includes(player.id);
+                  const winner = holeWinner(h, player);
+                  const won = winner === "won";
                   const half = winner === "half";
-                  const lost = winner && !won && winner !== "half";
+                  const lost = winner === "lost";
                   const cellBg = !gross ? "transparent" : won ? "#1B7A3D" : half ? "#E08A1E" : lost ? "#C8392D" : "transparent";
                   const cellColor = (won || half || lost) && gross ? C.white : C.black;
                   const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
@@ -6273,13 +6373,15 @@ function CompDetailView({ comp, onBack, onResume }) {
         </div>
       </div>
 
-      {/* Match result banner */}
-      {matchResult?.closedResult && (
-        <div style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.black, textAlign: "center" }}>
-          <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 6 }}>Result</div>
-          <div style={{ fontWeight: 900, fontSize: 22, color: C.white }}>{matchResult.closedResult}</div>
+      {/* Match result banner(s) — one per sub-match */}
+      {matchResults?.map((mr, mi) => mr.closedResult && (
+        <div key={mi} style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.black, textAlign: "center" }}>
+          <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 6 }}>
+            {matchResults.length > 1 ? `Match ${mi + 1} Result` : "Result"}
+          </div>
+          <div style={{ fontWeight: 900, fontSize: 22, color: C.white }}>{mr.closedResult}</div>
         </div>
-      )}
+      ))}
 
       {/* Non-matchplay result summary */}
       {comp.format !== "matchplay" && (() => {
