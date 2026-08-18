@@ -5467,7 +5467,7 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
           <div className="field" style={{ marginBottom: 20 }}>
             <label className="field-label">Match Type</label>
             <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              {[["pairs", "Pairs", "2v2, best ball"], ["singles", "Singles", "2 x 1v1 matches"]].map(([id, label, sub]) => (
+              {[["pairs", "Pairs", "2v2"], ["singles", "Singles", "1v1"]].map(([id, label, sub]) => (
                 <button
                   key={id}
                   onClick={() => setMatchType(id)}
