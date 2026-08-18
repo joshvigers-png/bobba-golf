@@ -197,6 +197,32 @@ const DB = {
     const snap = await getDocs(qy);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
+  // Ryder Cup events — a shared, multi-user collection (unlike everything
+  // else in DB, which lives under a single user's own document). An event
+  // is visible to and editable by anyone taking part, not just its host.
+  createRyderCupEvent: async (event) => {
+    const ref = doc(collection(db, "rydercup_events"));
+    const full = { ...event, id: ref.id, createdAt: Date.now(), status: "setup" };
+    await setDoc(ref, full);
+    return full;
+  },
+  getRyderCupEvent: async (eventId) => {
+    const snap = await getDoc(doc(db, "rydercup_events", eventId));
+    return snap.exists() ? { id: eventId, ...snap.data() } : null;
+  },
+  updateRyderCupEvent: async (eventId, data) => {
+    await updateDoc(doc(db, "rydercup_events", eventId), data);
+  },
+  deleteRyderCupEvent: async (eventId) => {
+    await deleteDoc(doc(db, "rydercup_events", eventId));
+  },
+  // Events where the current user is host or a participant — used to show
+  // "your Ryder Cup events" without needing to know IDs in advance.
+  getRyderCupEventsForUser: async (uid) => {
+    const q = query(collection(db, "rydercup_events"), where("participantIds", "array-contains", uid));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
 };
 
 // ─── Firestore sync helpers ──────────────────────────────────────────────────
@@ -5160,16 +5186,16 @@ function CompetitionScreen({ user, onBack }) {
           <div style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", background: C.cloud, color: C.steel, padding: "3px 8px", borderRadius: 20 }}>Soon</div>
         </div>
 
-        {/* Ryder Cup — Coming Soon */}
-        <div style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <div style={{ width: 18, height: 18, color: C.ash }}><Icon.ModTrophy /></div>
+        {/* Ryder Cup */}
+        <div onClick={() => setView("rydercup")} style={{ margin: "0 18px 18px", padding: "14px 16px", background: C.white, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: C.black, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 18, height: 18, color: C.white }}><Icon.ModTrophy /></div>
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 13, color: C.steel }}>Ryder Cup</div>
-            <div style={{ fontSize: 11, color: C.ash }}>Create your own team matchplay event</div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>Ryder Cup</div>
+            <div style={{ fontSize: 11, color: C.steel }}>Create your own team matchplay event</div>
           </div>
-          <div style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", background: C.cloud, color: C.steel, padding: "3px 8px", borderRadius: 20 }}>Soon</div>
+          <div style={{ marginLeft: "auto", width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
         </div>
 
         {recent.length > 0 && (
@@ -5213,6 +5239,11 @@ function CompetitionScreen({ user, onBack }) {
         )}
       </div>
     );
+  }
+
+  // ── Ryder Cup ──
+  if (view === "rydercup") {
+    return <RyderCupHome user={user} onBack={() => setView("home")} />;
   }
 
   // ── Course selection first ──
@@ -5431,6 +5462,274 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
 
 // ─── Competition Course Flow ───────────────────────────────────────────────────
 // Reuses the same search + scan pattern as Play a Round
+// ─── Ryder Cup ────────────────────────────────────────────────────────────────
+// Step 1 of the Ryder Cup build: create the event shell (name, days, games
+// per day, format per game). Team selection, invites, pairings and live
+// scoring are separate steps to be layered on top of this in future builds.
+const RYDER_CUP_FORMATS = [
+  { id: "foursomes", label: "Foursomes", sub: "Alternate shot, 2v2" },
+  { id: "fourballs", label: "Fourballs", sub: "Best ball, 2v2" },
+  { id: "singles",   label: "Singles", sub: "1v1" },
+];
+
+function newRyderCupDay(n) {
+  return { id: `day_${Date.now()}_${n}`, label: `Day ${n}`, games: [{ id: `game_${Date.now()}_0`, format: "foursomes" }] };
+}
+
+function RyderCupHome({ user, onBack }) {
+  const [screen, setScreen] = useState("list"); // list | setup | detail
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeEvent, setActiveEvent] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const list = await DB.getRyderCupEventsForUser(user.id);
+        setEvents(list.sort((a, b) => b.createdAt - a.createdAt));
+      } catch (e) { console.error("Ryder Cup load error:", e); }
+      setLoading(false);
+    };
+    load();
+  }, [user.id]);
+
+  // ── Setup form (Step 1) ──
+  if (screen === "setup") {
+    return (
+      <RyderCupSetup
+        user={user}
+        onBack={() => setScreen("list")}
+        onCreated={(event) => {
+          setEvents(e => [event, ...e]);
+          setActiveEvent(event);
+          setScreen("detail");
+        }}
+      />
+    );
+  }
+
+  // ── Event detail (placeholder until team selection / invites are built) ──
+  if (screen === "detail" && activeEvent) {
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <div className="page-head">
+          <button onClick={() => setScreen("list")} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+          </button>
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div className="page-head-eyebrow">Ryder Cup</div>
+            <h1>{activeEvent.name}</h1>
+          </div>
+        </div>
+
+        <div className="section-head"><span className="section-title">Schedule</span></div>
+        {activeEvent.days.map((day, i) => (
+          <div key={day.id} className="panel" style={{ margin: "0 18px 12px", padding: "14px 16px" }}>
+            <div style={{ fontWeight: 800, fontSize: 13.5, marginBottom: 8 }}>{day.label}</div>
+            {day.games.map((g, gi) => {
+              const fmt = RYDER_CUP_FORMATS.find(f => f.id === g.format);
+              return (
+                <div key={g.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: gi > 0 ? `1px solid ${C.line}` : "none" }}>
+                  <span style={{ fontSize: 12.5 }}>Game {gi + 1}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: C.steel }}>{fmt?.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        <div style={{ margin: "20px 18px 0", padding: "16px", background: C.cloud, border: `1px solid ${C.line}` }}>
+          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Event created</div>
+          <p style={{ fontSize: 12, color: C.steel, lineHeight: 1.55 }}>
+            Next up: inviting players, setting up teams and captains, and picking pairings. Those steps are coming soon — this event is saved and ready for them.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List ──
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+      <div className="page-head">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">Competition Mode</div>
+          <h1>Ryder Cup</h1>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 18px 18px" }}>
+        <button className="btn btn-primary" onClick={() => setScreen("setup")}>
+          + Create Ryder Cup Event
+        </button>
+      </div>
+
+      {loading && <p style={{ textAlign: "center", color: C.steel, fontSize: 13, padding: "24px 0" }}>Loading…</p>}
+
+      {!loading && events.length === 0 && (
+        <div className="empty">
+          <div className="empty-icon"><Icon.ModTrophy /></div>
+          <div className="empty-title">No Ryder Cup events yet</div>
+          <div className="empty-sub">Create one to set the format and schedule — you can invite players next.</div>
+        </div>
+      )}
+
+      {!loading && events.length > 0 && (
+        <>
+          <div className="section-head"><span className="section-title">Your Events</span></div>
+          {events.map(ev => (
+            <div key={ev.id} className="course-row" onClick={() => { setActiveEvent(ev); setScreen("detail"); }} style={{ cursor: "pointer" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>{ev.name}</div>
+                <div style={{ fontSize: 11.5, color: C.steel, marginTop: 2 }}>{ev.days.length} day{ev.days.length !== 1 ? "s" : ""} · {ev.status === "setup" ? "Setting up" : ev.status}</div>
+              </div>
+              <div style={{ width: 15, height: 15, color: C.fog }}><Icon.ChevronRight /></div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Step 1 — event shell setup: name, days, games per day, format per game.
+function RyderCupSetup({ user, onBack, onCreated }) {
+  const [name, setName] = useState("");
+  const [days, setDays] = useState([newRyderCupDay(1)]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const addDay = () => setDays(d => [...d, newRyderCupDay(d.length + 1)]);
+  const removeDay = (dayId) => setDays(d => d.length > 1 ? d.filter(x => x.id !== dayId) : d);
+
+  const addGame = (dayId) => setDays(d => d.map(day =>
+    day.id === dayId ? { ...day, games: [...day.games, { id: `game_${Date.now()}`, format: "foursomes" }] } : day
+  ));
+  const removeGame = (dayId, gameId) => setDays(d => d.map(day =>
+    day.id === dayId
+      ? { ...day, games: day.games.length > 1 ? day.games.filter(g => g.id !== gameId) : day.games }
+      : day
+  ));
+  const setGameFormat = (dayId, gameId, format) => setDays(d => d.map(day =>
+    day.id === dayId ? { ...day, games: day.games.map(g => g.id === gameId ? { ...g, format } : g) } : day
+  ));
+  const setDayLabel = (dayId, label) => setDays(d => d.map(day => day.id === dayId ? { ...day, label } : day));
+
+  const totalGames = days.reduce((s, d) => s + d.games.length, 0);
+
+  const create = async () => {
+    setError("");
+    if (!name.trim()) { setError("Give your event a name."); return; }
+    setSaving(true);
+    try {
+      const event = await DB.createRyderCupEvent({
+        name: name.trim(),
+        hostUid: user.id,
+        hostName: user.name,
+        participantIds: [user.id],
+        teams: [],
+        days,
+      });
+      onCreated(event);
+    } catch (e) {
+      console.error(e);
+      setError("Couldn't create the event. Please try again.");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 120 }}>
+      <div className="page-head">
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">Step 1 of 7</div>
+          <h1>Set Up Ryder Cup</h1>
+          <p>Name your event, then set the schedule — how many days, how many games each day, and the format for each.</p>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 18px" }}>
+        <div className="field" style={{ marginBottom: 22 }}>
+          <label className="field-label">Event Name</label>
+          <input className="input" placeholder="e.g. Bobba Golf Ryder Cup 2026" value={name} onChange={e => setName(e.target.value)} />
+        </div>
+
+        {days.map((day, di) => (
+          <div key={day.id} className="panel" style={{ padding: "14px 16px", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <input
+                className="input"
+                value={day.label}
+                onChange={e => setDayLabel(day.id, e.target.value)}
+                style={{ fontWeight: 800, fontSize: 14, padding: "8px 10px", flex: 1 }}
+              />
+              {days.length > 1 && (
+                <button onClick={() => removeDay(day.id)} style={{ width: 34, height: 34, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                  <div style={{ width: 14, height: 14, color: C.red }}><Icon.Trash /></div>
+                </button>
+              )}
+            </div>
+
+            {day.games.map((g, gi) => (
+              <div key={g.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em" }}>Game {gi + 1}</span>
+                  {day.games.length > 1 && (
+                    <button onClick={() => removeGame(day.id, g.id)} style={{ background: "none", border: "none", color: C.red, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {RYDER_CUP_FORMATS.map(fmt => (
+                    <button
+                      key={fmt.id}
+                      onClick={() => setGameFormat(day.id, g.id, fmt.id)}
+                      style={{
+                        flex: "1 1 30%", padding: "10px 8px", border: `1.5px solid ${g.format === fmt.id ? C.black : C.line}`,
+                        background: g.format === fmt.id ? C.black : C.white, color: g.format === fmt.id ? C.white : C.black,
+                        cursor: "pointer", textAlign: "center",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 800 }}>{fmt.label}</div>
+                      <div style={{ fontSize: 9.5, marginTop: 2, opacity: 0.8 }}>{fmt.sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            <button onClick={() => addGame(day.id)} className="btn btn-outline" style={{ padding: "8px 12px", fontSize: 11.5, marginTop: 4 }}>
+              + Add Game to {day.label}
+            </button>
+          </div>
+        ))}
+
+        <button onClick={addDay} className="btn btn-outline" style={{ marginBottom: 24 }}>
+          + Add Another Day
+        </button>
+
+        <div style={{ fontSize: 11.5, color: C.steel, marginBottom: 18 }}>
+          {days.length} day{days.length !== 1 ? "s" : ""} · {totalGames} game{totalGames !== 1 ? "s" : ""} total
+        </div>
+
+        {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14 }}>{error}</p>}
+
+        <button className="btn btn-primary" onClick={create} disabled={saving} style={{ opacity: saving ? 0.6 : 1 }}>
+          {saving ? "Creating…" : "Create Event"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CompCourseFlow({ onBack, onNext }) {
   const [step, setStep] = useState("search"); // search | scan
   const [query, setQuery] = useState("");
