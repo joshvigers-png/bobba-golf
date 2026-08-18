@@ -4899,6 +4899,23 @@ function HandicapChart({ points }) {
         {beforeCoords.map((c, i) => c && (
           <circle key={`bp${i}`} cx={c.x} cy={c.y} r="2.2" fill={C.white} stroke={C.fog} strokeWidth="1.4" />
         ))}
+        {/* Only label the "before" point when it's clearly different from
+            the "after" value that round — if a round didn't move the index,
+            showing the same number twice is just clutter. Placed on the
+            opposite side from the after label so the two never collide. */}
+        {beforeCoords.map((c, i) => {
+          if (!c) return null;
+          const afterV = afterCoords[i]?.v;
+          if (afterV != null && Math.abs(c.v - afterV) < 0.15) return null;
+          return (
+            <text
+              key={`bv${i}`} x={c.x} y={labelAbove[i] ? c.y + 15 : c.y - 9}
+              textAnchor="middle" fontSize="9" fontWeight="700" fill={C.steel}
+            >
+              {c.v.toFixed(1)}
+            </text>
+          );
+        })}
 
         {/* "After" line — primary, coloured by improvement, with value labels */}
         {afterSegments.map((seg, i) => (
