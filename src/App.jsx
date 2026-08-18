@@ -5444,11 +5444,35 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
     { id: 2, name: "", handicap: "" },
   ]);
   const [error, setError] = useState("");
+  // Which player index (into `players`) sits in each pair/slot, for 4-ball
+  // match play specifically — [[pair1 slot0, pair1 slot1], [pair2 slot0, pair2 slot1]].
+  // Defaults to entry order, but this is what lets someone actually choose
+  // who's partnered with whom rather than it being silently assumed.
+  const [pairs, setPairs] = useState([[0, 1], [2, 3]]);
+
+  const setPairSlot = (pairIdx, slotIdx, playerIdx) => {
+    setPairs(prev => {
+      const next = prev.map(p => [...p]);
+      // If that player is already sitting somewhere else, swap them with
+      // whoever's currently in the target slot — guarantees every player
+      // stays assigned exactly once, no duplicates or gaps possible.
+      for (let pi = 0; pi < next.length; pi++) {
+        for (let si = 0; si < next[pi].length; si++) {
+          if (next[pi][si] === playerIdx && !(pi === pairIdx && si === slotIdx)) {
+            next[pi][si] = next[pairIdx][slotIdx];
+          }
+        }
+      }
+      next[pairIdx][slotIdx] = playerIdx;
+      return next;
+    });
+  };
 
   const updateBallCount = (n) => {
     setBallCount(n);
     const next = Array.from({ length: n }, (_, i) => players[i] || { id: i + 1, name: "", handicap: "" });
     setPlayers(next);
+    if (n === 4) setPairs([[0, 1], [2, 3]]);
   };
 
   const updatePlayer = (idx, field, val) => {
@@ -5461,11 +5485,17 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
     if (!gameName.trim()) { setError("Please enter a game name."); return; }
     if (players.some(p => !p.name.trim())) { setError("Please enter a name for every player."); return; }
     setError("");
+    // For 4-ball match play, reorder players into [pair1, pair1, pair2, pair2]
+    // to match how the scoring engine pairs players[0]+[1] vs players[2]+[3] —
+    // this is what actually makes the chosen pairing take effect.
+    const orderedPlayers = (format === "matchplay" && ballCount === 4)
+      ? [pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]].map(i => players[i])
+      : players;
     onNext({
       gameName: gameName.trim(),
       format,
       ballCount,
-      players: players.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
+      players: orderedPlayers.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
       sideGames: { nearestPin: false, nearestIn2: false, longestDrive: false },
     });
   };
@@ -5525,6 +5555,40 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
             </div>
           ))}
         </div>
+
+        {/* Pairs — only relevant for 4-ball match play, since match play only
+            makes sense as 1v1 or pairs vs pairs, never a 4-way free-for-all.
+            The pair each player sits in here is what the leaderboard uses:
+            best individual net score within each pair wins that hole for
+            their team. */}
+        {format === "matchplay" && ballCount === 4 && (
+          <div className="field" style={{ marginBottom: 20 }}>
+            <label className="field-label">Pairs</label>
+            <p style={{ fontSize: 11, color: C.steel, marginTop: -4, marginBottom: 10, lineHeight: 1.5 }}>
+              Match play with 4 players is pairs vs pairs — best individual net score in each pair wins the hole for that team. Choose who's partnered together.
+            </p>
+            {pairs.map((pair, pairIdx) => (
+              <div key={pairIdx} style={{ border: `1.5px solid ${C.line}`, padding: "10px 12px", marginBottom: 8 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>Pair {pairIdx + 1}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {pair.map((playerIdx, slotIdx) => (
+                    <select
+                      key={slotIdx}
+                      className="input"
+                      style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
+                      value={playerIdx}
+                      onChange={e => setPairSlot(pairIdx, slotIdx, parseInt(e.target.value))}
+                    >
+                      {players.map((p, i) => (
+                        <option key={i} value={i}>{p.name.trim() || `Player ${i + 1}`}</option>
+                      ))}
+                    </select>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && <p style={{ fontSize: 12, color: C.red, marginBottom: 10 }}>{error}</p>}
         <button className="btn btn-primary" onClick={handleNext}>Start Game</button>
