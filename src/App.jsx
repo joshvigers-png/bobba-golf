@@ -5628,6 +5628,7 @@ function RyderCupHome({ user, onBack }) {
   const [guestFormOpen, setGuestFormOpen] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [guestHandicap, setGuestHandicap] = useState("");
+  const [teamsFlowOpen, setTeamsFlowOpen] = useState(false);
   const [respondingId, setRespondingId] = useState(null);
   const [playerProfiles, setPlayerProfiles] = useState([]); // resolved profiles for the active event's people
 
@@ -5872,11 +5873,47 @@ function RyderCupHome({ user, onBack }) {
           />
         )}
 
-        <div style={{ margin: "8px 18px 0", padding: "14px 16px", background: C.cloud, border: `1px solid ${C.line}` }}>
-          <p style={{ fontSize: 11.5, color: C.steel, lineHeight: 1.55 }}>
-            Next up: setting up teams and captains, then match pairings. Coming soon.
-          </p>
+        <div className="section-head"><span className="section-title">Teams & Pairings</span></div>
+        <div style={{ margin: "0 18px 18px" }}>
+          {(activeEvent.teams || []).length === 2 ? (
+            <>
+              <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                {activeEvent.teams.map(t => {
+                  const count = (activeEvent.teamAssignments?.[t.id] || []).length;
+                  const captain = playerProfiles.find(p => p.id === t.captainId) || (activeEvent.guestParticipants || []).find(g => g.id === t.captainId);
+                  return (
+                    <div key={t.id} style={{ flex: 1, border: `1.5px solid ${C.black}`, padding: "12px 14px" }}>
+                      <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{t.name}</div>
+                      <div style={{ fontSize: 11, color: C.steel }}>{count} player{count !== 1 ? "s" : ""}</div>
+                      {captain && <div style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>Captain: {captain.name}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11.5, color: C.steel, marginBottom: 12 }}>
+                {(activeEvent.matches || []).length} match{(activeEvent.matches || []).length !== 1 ? "es" : ""} set up
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 14 }}>
+              Set team names, pick captains, allocate players, then pair them up for each game on the schedule.
+            </p>
+          )}
+          {activeEvent.hostUid === user.id && (
+            <button className="btn btn-primary" onClick={() => setTeamsFlowOpen(true)}>
+              {(activeEvent.teams || []).length === 2 ? "Edit Teams & Pairings" : "Set Up Teams & Pairings"}
+            </button>
+          )}
         </div>
+
+        {teamsFlowOpen && (
+          <RyderCupTeamsFlow
+            event={activeEvent}
+            allPlayers={playerProfiles}
+            onClose={() => setTeamsFlowOpen(false)}
+            onSaved={(updated) => { setActiveEvent(ev => ({ ...ev, ...updated })); setTeamsFlowOpen(false); }}
+          />
+        )}
 
         {deleteConfirm && (
           <div className="sheet-overlay" onClick={() => setDeleteConfirm(false)}>
@@ -6253,6 +6290,272 @@ function RyderCupInviteSheet({ event, user, onClose, onInvited }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Ryder Cup Step 3-5: Teams, Captains, Player Allocation, Pairings ────────
+// One flow covering: pick captains → allocate everyone else to a team (with
+// an editable handicap, defaulting from their profile or guest entry) →
+// pair players up for every game on the schedule and assign a scorer.
+function RyderCupTeamsFlow({ event, allPlayers, onClose, onSaved }) {
+  const [step, setStep] = useState("captains"); // captains | allocate | pairings
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Combine real joined participants (not pending invites) with guest
+  // players into one flat pool to assign into teams.
+  const realIds = [event.hostUid, ...(event.participantIds || []).filter(id => id !== event.hostUid)];
+  const realParticipants = realIds.map(id => allPlayers.find(p => p.id === id)).filter(Boolean);
+  const guestParticipants = (event.guestParticipants || []).map(g => ({ id: g.id, name: g.name, handicap: g.handicap, isGuest: true }));
+  const allParticipants = [...realParticipants, ...guestParticipants];
+
+  const existingTeams = event.teams || [];
+  const [team1Name, setTeam1Name] = useState(existingTeams[0]?.name || "Team 1");
+  const [team2Name, setTeam2Name] = useState(existingTeams[1]?.name || "Team 2");
+  const [captain1, setCaptain1] = useState(existingTeams[0]?.captainId || "");
+  const [captain2, setCaptain2] = useState(existingTeams[1]?.captainId || "");
+
+  const [assignments, setAssignments] = useState(() => {
+    const a = {};
+    (event.teamAssignments?.team1 || []).forEach(id => { a[id] = "team1"; });
+    (event.teamAssignments?.team2 || []).forEach(id => { a[id] = "team2"; });
+    return a;
+  });
+  const [handicaps, setHandicaps] = useState(() => {
+    const h = {};
+    allParticipants.forEach(p => {
+      h[p.id] = event.eventHandicaps?.[p.id] != null ? String(event.eventHandicaps[p.id]) : (p.handicap != null ? String(p.handicap) : "");
+    });
+    return h;
+  });
+
+  // Flat list of every game across every day, with a stable combined key
+  const allGames = (event.days || []).flatMap(day => day.games.map(g => ({ ...g, dayId: day.id, dayLabel: day.label })));
+  const [matches, setMatches] = useState(() => {
+    const existing = {};
+    (event.matches || []).forEach(m => { existing[`${m.dayId}_${m.gameId}`] = m; });
+    return allGames.reduce((acc, g) => {
+      const key = `${g.dayId}_${g.id}`;
+      acc[key] = existing[key] || { dayId: g.dayId, gameId: g.id, team1PlayerIds: [], team2PlayerIds: [], scorerId: "" };
+      return acc;
+    }, {});
+  });
+
+  const nameOf = (id) => allParticipants.find(p => p.id === id)?.name || "—";
+  const team1Players = allParticipants.filter(p => assignments[p.id] === "team1");
+  const team2Players = allParticipants.filter(p => assignments[p.id] === "team2");
+  const unassigned = allParticipants.filter(p => !assignments[p.id]);
+
+  const setTeam = (playerId, team) => {
+    setAssignments(a => ({ ...a, [playerId]: team }));
+  };
+
+  // Picking a captain automatically puts them on that team too
+  const pickCaptain = (teamNum, playerId) => {
+    if (teamNum === 1) { setCaptain1(playerId); setTeam(playerId, "team1"); }
+    else { setCaptain2(playerId); setTeam(playerId, "team2"); }
+  };
+
+  const setMatchSlot = (key, side, slotIdx, playerId) => {
+    setMatches(m => {
+      const match = { ...m[key] };
+      const arr = [...match[side]];
+      arr[slotIdx] = playerId;
+      match[side] = arr;
+      return { ...m, [key]: match };
+    });
+  };
+  const setMatchScorer = (key, scorerId) => {
+    setMatches(m => ({ ...m, [key]: { ...m[key], scorerId } }));
+  };
+
+  const goToAllocate = () => {
+    setError("");
+    if (!team1Name.trim() || !team2Name.trim()) { setError("Give both teams a name."); return; }
+    if (!captain1 || !captain2) { setError("Pick a captain for each team."); return; }
+    if (captain1 === captain2) { setError("Captains must be two different people."); return; }
+    setStep("allocate");
+  };
+
+  const goToPairings = () => {
+    setError("");
+    if (unassigned.length > 0) { setError(`${unassigned.length} player${unassigned.length !== 1 ? "s" : ""} still need a team.`); return; }
+    if (team1Players.length === 0 || team2Players.length === 0) { setError("Both teams need at least one player."); return; }
+    setStep("pairings");
+  };
+
+  const saveAll = async () => {
+    setError("");
+    setSaving(true);
+    try {
+      const teams = [
+        { id: "team1", name: team1Name.trim(), captainId: captain1 },
+        { id: "team2", name: team2Name.trim(), captainId: captain2 },
+      ];
+      const teamAssignments = { team1: team1Players.map(p => p.id), team2: team2Players.map(p => p.id) };
+      const eventHandicaps = {};
+      Object.keys(handicaps).forEach(id => {
+        if (handicaps[id] !== "") eventHandicaps[id] = parseFloat(handicaps[id]);
+      });
+      const matchList = Object.values(matches);
+      await DB.updateRyderCupEvent(event.id, { teams, teamAssignments, eventHandicaps, matches: matchList });
+      onSaved({ teams, teamAssignments, eventHandicaps, matches: matchList });
+    } catch (e) {
+      console.error(e);
+      setError("Couldn't save. Please try again.");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: C.paper, zIndex: 200, overflowY: "auto" }}>
+      <div className="page-head">
+        <button onClick={onClose} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+        </button>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div className="page-head-eyebrow">
+            {step === "captains" ? "Step 3 · Teams & Captains" : step === "allocate" ? "Step 4 · Allocate Players" : "Step 5 · Pairings"}
+          </div>
+          <h1>{event.name}</h1>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 18px 40px" }}>
+
+        {/* ── Step 3: Teams & Captains ── */}
+        {step === "captains" && (
+          <>
+            {[1, 2].map(n => (
+              <div key={n} className="panel" style={{ padding: "14px 16px", marginBottom: 14 }}>
+                <div className="field" style={{ marginBottom: 14 }}>
+                  <label className="field-label">Team {n} Name</label>
+                  <input className="input" value={n === 1 ? team1Name : team2Name} onChange={e => n === 1 ? setTeam1Name(e.target.value) : setTeam2Name(e.target.value)} />
+                </div>
+                <label className="field-label">Captain</label>
+                <select className="input" value={n === 1 ? captain1 : captain2} onChange={e => pickCaptain(n, e.target.value)} style={{ marginTop: 4 }}>
+                  <option value="">Select a captain…</option>
+                  {allParticipants.map(p => (
+                    <option key={p.id} value={p.id} disabled={n === 1 ? p.id === captain2 : p.id === captain1}>{p.name}{p.isGuest ? " (Guest)" : ""}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14 }}>{error}</p>}
+            <button className="btn btn-primary" onClick={goToAllocate}>Next: Allocate Players</button>
+          </>
+        )}
+
+        {/* ── Step 4: Allocate players + handicaps ── */}
+        {step === "allocate" && (
+          <>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 16 }}>
+              Assign every player to a team. Handicaps are pulled in automatically where possible — adjust any of them for this event if needed.
+            </p>
+            {allParticipants.map(p => (
+              <div key={p.id} className="panel" style={{ padding: "12px 14px", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <PersonAvatar person={p} size={32} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}{p.id === captain1 || p.id === captain2 ? " (Captain)" : ""}</div>
+                    {p.isGuest && <div style={{ fontSize: 10.5, color: C.ash }}>Guest</div>}
+                  </div>
+                  <input
+                    className="input"
+                    type="number" step="0.1" placeholder="HCP"
+                    value={handicaps[p.id] || ""}
+                    onChange={e => setHandicaps(h => ({ ...h, [p.id]: e.target.value }))}
+                    style={{ width: 70, padding: "8px 8px", fontSize: 12.5, flexShrink: 0 }}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[["team1", team1Name], ["team2", team2Name]].map(([teamId, label]) => (
+                    <button
+                      key={teamId}
+                      onClick={() => setTeam(p.id, teamId)}
+                      disabled={p.id === captain1 || p.id === captain2}
+                      style={{
+                        flex: 1, padding: "8px 0", fontSize: 12, fontWeight: 800,
+                        border: `1.5px solid ${assignments[p.id] === teamId ? C.black : C.line}`,
+                        background: assignments[p.id] === teamId ? C.black : C.white,
+                        color: assignments[p.id] === teamId ? C.white : C.black,
+                        cursor: (p.id === captain1 || p.id === captain2) ? "default" : "pointer",
+                        opacity: (p.id === captain1 || p.id === captain2) ? 0.6 : 1,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14 }}>{error}</p>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setStep("captains")}>Back</button>
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={goToPairings}>Next: Pairings</button>
+            </div>
+          </>
+        )}
+
+        {/* ── Step 5: Pairings + scorer per game ── */}
+        {step === "pairings" && (
+          <>
+            <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55, marginBottom: 16 }}>
+              For each game, choose who's facing whom and who'll be entering the scores.
+            </p>
+            {allGames.map(g => {
+              const key = `${g.dayId}_${g.id}`;
+              const match = matches[key];
+              const grp = RYDER_CUP_GROUP_TYPES.find(f => f.id === g.groupType);
+              const fmt = RYDER_CUP_FORMATS.find(f => f.id === g.format);
+              const slotCount = g.groupType === "pairs" ? 2 : 1;
+              const matchPlayerIds = [...match.team1PlayerIds, ...match.team2PlayerIds].filter(Boolean);
+              return (
+                <div key={key} className="panel" style={{ padding: "14px 16px", marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{g.dayLabel}</div>
+                  <div style={{ fontSize: 11, color: C.steel, marginBottom: 12 }}>{grp?.label} · {fmt?.label}</div>
+
+                  {[["team1PlayerIds", team1Name, team1Players], ["team2PlayerIds", team2Name, team2Players]].map(([side, label, pool]) => (
+                    <div key={side} style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{label}</div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {Array.from({ length: slotCount }).map((_, slotIdx) => (
+                          <select
+                            key={slotIdx}
+                            className="input"
+                            style={{ flex: 1, padding: "9px 8px", fontSize: 12.5 }}
+                            value={match[side][slotIdx] || ""}
+                            onChange={e => setMatchSlot(key, side, slotIdx, e.target.value)}
+                          >
+                            <option value="">Select…</option>
+                            {pool.map(p => (
+                              <option key={p.id} value={p.id} disabled={matchPlayerIds.includes(p.id) && match[side][slotIdx] !== p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Scorer</div>
+                  <select className="input" style={{ padding: "9px 8px", fontSize: 12.5 }} value={match.scorerId} onChange={e => setMatchScorer(key, e.target.value)}>
+                    <option value="">Select…</option>
+                    {matchPlayerIds.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+            {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14 }}>{error}</p>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setStep("allocate")} disabled={saving}>Back</button>
+              <button className="btn btn-primary" style={{ flex: 2, opacity: saving ? 0.6 : 1 }} onClick={saveAll} disabled={saving}>
+                {saving ? "Saving…" : "Save Teams & Pairings"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
