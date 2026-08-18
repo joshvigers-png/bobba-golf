@@ -2617,6 +2617,18 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
   const rounds = LS.get(`bb_rounds_${user.id}`) || [];
   const comps = LS.get(`bb_comps_${user.id}`) || [];
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [ryderCupInvites, setRyderCupInvites] = useState([]);
+
+  // Ryder Cup invites live on the event documents themselves (not as a
+  // field on the user's own profile like friendRequests is), so they need
+  // an actual fetch rather than just reading straight off `user`.
+  useEffect(() => {
+    let cancelled = false;
+    DB.getRyderCupInvitesForUser(user.id)
+      .then(list => { if (!cancelled) setRyderCupInvites(list); })
+      .catch(e => console.error("Ryder Cup invite check error:", e));
+    return () => { cancelled = true; };
+  }, [user.id]);
 
   const modules = [
     { id: "bag",         label: "The Bag", sub: "Your setup", icon: <Icon.ModBag />, ready: true },
@@ -2641,9 +2653,9 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={() => setNotificationsOpen(true)} style={{ background: C.white, border: `1.5px solid ${C.line}`, width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: C.black, cursor: "pointer", position: "relative" }}>
               <div style={{ width: 18, height: 18 }}><Icon.Bell /></div>
-              {(user.friendRequests || []).length > 0 && (
+              {((user.friendRequests || []).length + ryderCupInvites.length) > 0 && (
                 <div style={{ position: "absolute", top: -2, right: -2, width: 16, height: 16, borderRadius: "50%", background: C.red, color: C.white, fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {(user.friendRequests || []).length}
+                  {(user.friendRequests || []).length + ryderCupInvites.length}
                 </div>
               )}
             </button>
@@ -2756,27 +2768,43 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
           <div className="sheet" onClick={e => e.stopPropagation()}>
             <div className="sheet-handle" />
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Notifications</div>
-            {(user.friendRequests || []).length > 0 ? (
-              <>
-                <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10, alignItems: "center" }}>
-                  <div style={{ width: 18, height: 18, color: "#1B7A3D", flexShrink: 0 }}><Icon.Users2 /></div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 800, fontSize: 13, color: "#1B7A3D" }}>
-                      {(user.friendRequests || []).length} Friend Request{(user.friendRequests || []).length !== 1 ? "s" : ""}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: "#1B7A3D", opacity: 0.8 }}>Open The Lounge to accept or decline</div>
+            {(user.friendRequests || []).length > 0 && (
+              <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "12px 14px", marginBottom: 12, display: "flex", gap: 10, alignItems: "center" }}>
+                <div style={{ width: 18, height: 18, color: "#1B7A3D", flexShrink: 0 }}><Icon.Users2 /></div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: "#1B7A3D" }}>
+                    {(user.friendRequests || []).length} Friend Request{(user.friendRequests || []).length !== 1 ? "s" : ""}
                   </div>
+                  <div style={{ fontSize: 11.5, color: "#1B7A3D", opacity: 0.8 }}>Open The Lounge to accept or decline</div>
                 </div>
-                <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>View in The Lounge</button>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
-                  No new notifications. Friend requests will appear here when someone adds you.
-                </p>
-                <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>Got it</button>
-              </>
+              </div>
             )}
+            {ryderCupInvites.length > 0 && (
+              <div style={{ background: "#EDF7F0", border: "1px solid #1B7A3D", padding: "12px 14px", marginBottom: 12, display: "flex", gap: 10, alignItems: "center" }}>
+                <div style={{ width: 18, height: 18, color: "#1B7A3D", flexShrink: 0 }}><Icon.ModTrophy /></div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: "#1B7A3D" }}>
+                    {ryderCupInvites.length} Ryder Cup Invite{ryderCupInvites.length !== 1 ? "s" : ""}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#1B7A3D", opacity: 0.8 }}>Open Competition Mode to accept or decline</div>
+                </div>
+              </div>
+            )}
+            {(user.friendRequests || []).length === 0 && ryderCupInvites.length === 0 && (
+              <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.6, marginBottom: 22 }}>
+                No new notifications. Friend requests and event invites will appear here.
+              </p>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setNotificationsOpen(false);
+                if (ryderCupInvites.length > 0 && (user.friendRequests || []).length === 0) onOpenModule("tournaments");
+                else if ((user.friendRequests || []).length > 0) onOpenModule("community");
+              }}
+            >
+              {(user.friendRequests || []).length > 0 || ryderCupInvites.length > 0 ? "View" : "Got it"}
+            </button>
           </div>
         </div>
       )}
