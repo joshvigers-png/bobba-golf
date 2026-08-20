@@ -5700,16 +5700,26 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
   const shareLeaderboard = async () => {
     if (!leaderboardShareRef.current || sharingLeaderboard) return;
     setSharingLeaderboard(true);
+
+    // Resetting scroll position alone wasn't enough — the sheet still has
+    // `overflow-y: auto` and `max-height: 88vh` active during capture,
+    // which can clip or mis-measure anything that would otherwise need
+    // scrolling to see, regardless of scroll position. Removing that
+    // constraint entirely for the moment of capture (then restoring it
+    // in `finally`, so it's undone even if something goes wrong) is what
+    // actually guarantees the full content lays out and gets captured
+    // correctly, with nothing cut off or measured against the wrong bounds.
+    const scrollParent = leaderboardShareRef.current.closest(".sheet");
+    const prevOverflow = scrollParent ? scrollParent.style.overflow : null;
+    const prevMaxHeight = scrollParent ? scrollParent.style.maxHeight : null;
+    const prevScrollTop = scrollParent ? scrollParent.scrollTop : 0;
+
     try {
-      // The overlapping/cut-off look in earlier tests came from html2canvas
-      // miscalculating position when either the page itself, or the sheet's
-      // own internal scroll area, isn't at the top when captured — it grabs
-      // the wrong vertical slice and different parts of the content bleed
-      // into each other. Resetting both scroll positions and giving the
-      // browser a frame to settle before capturing fixes this reliably.
-      const scrollParent = leaderboardShareRef.current.closest(".sheet");
-      const prevScrollTop = scrollParent ? scrollParent.scrollTop : 0;
-      if (scrollParent) scrollParent.scrollTop = 0;
+      if (scrollParent) {
+        scrollParent.style.overflow = "visible";
+        scrollParent.style.maxHeight = "none";
+        scrollParent.scrollTop = 0;
+      }
       await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
 
       const canvas = await html2canvas(leaderboardShareRef.current, {
@@ -5723,8 +5733,6 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
         width: leaderboardShareRef.current.scrollWidth,
         height: leaderboardShareRef.current.scrollHeight,
       });
-
-      if (scrollParent) scrollParent.scrollTop = prevScrollTop;
 
       const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
       const fileName = `${(comp.gameName || comp.courseName || "leaderboard").replace(/[^a-z0-9]+/gi, "-")}.png`;
@@ -5749,8 +5757,14 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
       // AbortError just means the person cancelled the native share sheet —
       // not a real error, nothing to report.
       if (e?.name !== "AbortError") console.error("Share leaderboard error:", e);
+    } finally {
+      if (scrollParent) {
+        scrollParent.style.overflow = prevOverflow;
+        scrollParent.style.maxHeight = prevMaxHeight;
+        scrollParent.scrollTop = prevScrollTop;
+      }
+      setSharingLeaderboard(false);
     }
-    setSharingLeaderboard(false);
   };
   const [showSideGame, setShowSideGame] = useState(null);
 
