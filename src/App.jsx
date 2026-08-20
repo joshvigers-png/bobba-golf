@@ -5652,11 +5652,29 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
     if (!leaderboardShareRef.current || sharingLeaderboard) return;
     setSharingLeaderboard(true);
     try {
+      // The overlapping/cut-off look in earlier tests came from html2canvas
+      // miscalculating position when either the page itself, or the sheet's
+      // own internal scroll area, isn't at the top when captured — it grabs
+      // the wrong vertical slice and different parts of the content bleed
+      // into each other. Resetting both scroll positions and giving the
+      // browser a frame to settle before capturing fixes this reliably.
+      const scrollParent = leaderboardShareRef.current.closest(".sheet");
+      const prevScrollTop = scrollParent ? scrollParent.scrollTop : 0;
+      if (scrollParent) scrollParent.scrollTop = 0;
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+
       const canvas = await html2canvas(leaderboardShareRef.current, {
         backgroundColor: "#ffffff",
         scale: 2, // sharp on retina/mobile screens
         useCORS: true,
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        windowWidth: document.documentElement.offsetWidth,
+        windowHeight: document.documentElement.offsetHeight,
       });
+
+      if (scrollParent) scrollParent.scrollTop = prevScrollTop;
+
       const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
       const fileName = `${(comp.gameName || comp.courseName || "leaderboard").replace(/[^a-z0-9]+/gi, "-")}.png`;
       const file = new File([blob], fileName, { type: "image/png" });
