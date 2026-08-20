@@ -6960,6 +6960,30 @@ function CompDetailView({ comp, onBack, onResume }) {
         <HoleGrid holeSet={back} label="Player" />
       </div>
 
+      {/* Round summary — total strokes and points per player across all 18 */}
+      <div style={{ margin: "0 18px 18px" }}>
+        <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel, marginBottom: 6 }}>Round Summary</div>
+        <div style={{ border: `1px solid ${C.line}`, overflow: "hidden" }}>
+          {comp.players.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: i % 2 === 0 ? C.white : C.paper, borderBottom: i < comp.players.length - 1 ? `1px solid ${C.line}` : "none" }}>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>{p.name}</div>
+              <div style={{ display: "flex", gap: 18 }}>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>{playerTotal(p, "strokes") || "—"}</div>
+                  <div style={{ fontSize: 9.5, color: C.steel }}>strokes</div>
+                </div>
+                {comp.format !== "stroke" && (
+                  <div style={{ textAlign: "right", minWidth: 34 }}>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: "#1B7A3D" }}>{playerTotal(p, "pts")}</div>
+                    <div style={{ fontSize: 9.5, color: C.steel }}>pts</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Side game winners */}
       {Object.entries(comp.sideGames || {}).filter(([,v])=>v).some(([k]) => comp.sideGameWinners?.[k]) && (
         <div style={{ margin: "0 18px 18px" }}>
