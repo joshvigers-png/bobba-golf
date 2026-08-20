@@ -5153,6 +5153,10 @@ function CompetitionScreen({ user, onBack }) {
   // ── Home ──
   if (view === "home") {
     const recent = [...comps].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 3);
+    // A game that's been set up and started but not yet finished — closing
+    // or reopening the app shouldn't lose this, and it shouldn't be buried
+    // in history either; it needs to be the first thing offered back.
+    const inProgressComp = comps.find(c => !c.completed);
     return (
       <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
         <div className="page-head">
@@ -5164,6 +5168,21 @@ function CompetitionScreen({ user, onBack }) {
             <h1>Play with Friends</h1>
           </div>
         </div>
+
+        {inProgressComp && (
+          <div style={{ margin: "0 18px 18px", padding: "16px", background: C.black, color: C.white, cursor: "pointer" }} onClick={() => { setActiveComp(inProgressComp); setView("scoring"); }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "rgba(255,255,255,.55)", marginBottom: 6 }}>Game in progress</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{inProgressComp.gameName || inProgressComp.courseName}</div>
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.65)", marginTop: 2 }}>
+                  {COMP_FORMATS.find(f=>f.id===inProgressComp.format)?.label} · {inProgressComp.players.length}-ball
+                </div>
+              </div>
+              <div style={{ width: 15, height: 15, color: C.white, flexShrink: 0 }}><Icon.ChevronRight /></div>
+            </div>
+          </div>
+        )}
 
         <div style={{ padding: "0 18px 18px" }}>
           <button className="btn btn-primary" style={{ marginBottom: 10 }} onClick={() => setView("course")}>
