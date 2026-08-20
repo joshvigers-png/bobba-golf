@@ -5693,7 +5693,7 @@ function CompCourseFlow({ onBack, onNext }) {
 // the same content, rendered off-screen (never visible, never scrollable,
 // never part of the sheet's DOM at all) purely so there's something simple
 // and unambiguous to actually photograph.
-function ShareableLeaderboardCard({ comp, holes, scores, matchResults, playerPts, cardRef }) {
+function ShareableLeaderboardCard({ comp, holes, scores, matchResults, playerPts, netScore, holeWinner, cardRef }) {
   const front = holes.slice(0, 9);
   const back = holes.slice(9, 18);
 
@@ -5728,10 +5728,22 @@ function ShareableLeaderboardCard({ comp, holes, scores, matchResults, playerPts
               {holeSet.map(h => {
                 const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
                 const pts = playerPts(player, h);
+                const net = netScore(player, h);
+                const winner = holeWinner(h, player);
+                const won = winner === "won";
+                const half = winner === "half";
+                const lost = winner === "lost";
+                const cellBg = !gross ? "transparent" : won ? "#1B7A3D" : half ? "#E08A1E" : lost ? "#C8392D" : "transparent";
+                const cellColor = (won || half || lost) && gross ? C.white : C.black;
+                const secondary = comp.format === "stableford" ? pts : comp.format === "matchplay" ? net : null;
                 return (
-                  <td key={h.n} style={{ padding: "3px", textAlign: "center" }}>
-                    <div style={{ fontWeight: 800, fontSize: 10 }}>{gross || "—"}</div>
-                    {comp.format !== "stroke" && <div style={{ fontSize: 8.5, color: C.steel }}>{pts != null ? pts : ""}</div>}
+                  <td key={h.n} style={{ padding: "2px", textAlign: "center", background: cellBg, outline: "1px solid rgba(0,0,0,0.12)" }}>
+                    <div style={{ fontWeight: 800, fontSize: 10, color: cellColor }}>{gross || ""}</div>
+                    {comp.format !== "stroke" && (
+                      <div style={{ fontWeight: 700, fontSize: 8.5, color: gross ? (won || half || lost ? "rgba(255,255,255,.7)" : C.steel) : C.ash }}>
+                        {gross ? (secondary ?? "0") : ""}
+                      </div>
+                    )}
                   </td>
                 );
               })}
@@ -5975,6 +5987,43 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
     }
     return null;
   })();
+
+  // Per-player hole result — works the same way for 2-ball singles,
+  // 4-ball pairs (best ball per team), and 4-ball singles (each
+  // player judged only against their own designated opponent).
+  const holeWinner = (h, player) => {
+    if (comp.format !== "matchplay") return null;
+    if (comp.ballCount === 2) {
+      const [p1, p2] = comp.players;
+      const n1 = netScore(p1, h), n2 = netScore(p2, h);
+      if (n1 == null || n2 == null) return null;
+      if (n1 === n2) return "half";
+      const isP1 = player.id === p1.id;
+      if (n1 < n2) return isP1 ? "won" : "lost";
+      return isP1 ? "lost" : "won";
+    }
+    if (comp.ballCount === 4 && comp.matchType === "singles") {
+      const idx = comp.players.findIndex(p => p.id === player.id);
+      const opponent = comp.players[idx % 2 === 0 ? idx + 1 : idx - 1];
+      const n1 = netScore(player, h), n2 = netScore(opponent, h);
+      if (n1 == null || n2 == null) return null;
+      if (n1 === n2) return "half";
+      return n1 < n2 ? "won" : "lost";
+    }
+    if (comp.ballCount === 4) {
+      const team1 = [comp.players[0], comp.players[1]];
+      const team2 = [comp.players[2], comp.players[3]];
+      const nets1 = team1.map(p => netScore(p, h));
+      const nets2 = team2.map(p => netScore(p, h));
+      if (nets1.some(n => n == null) || nets2.some(n => n == null)) return null;
+      const n1 = Math.min(...nets1), n2 = Math.min(...nets2);
+      if (n1 === n2) return "half";
+      const onTeam1 = team1.some(p => p.id === player.id);
+      if (n1 < n2) return onTeam1 ? "won" : "lost";
+      return onTeam1 ? "lost" : "won";
+    }
+    return null;
+  };
 
   // ── Leaderboard calculations ──
   const leaderboard = () => {
@@ -6248,48 +6297,13 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
           scores={scores}
           matchResults={matchResults}
           playerPts={playerPts}
+          netScore={netScore}
+          holeWinner={holeWinner}
           cardRef={leaderboardShareRef}
         />
       )}
 
       {showLeaderboard && (() => {
-        // Per-player hole result — works the same way for 2-ball singles,
-        // 4-ball pairs (best ball per team), and 4-ball singles (each
-        // player judged only against their own designated opponent).
-        const holeWinner = (h, player) => {
-          if (comp.format !== "matchplay") return null;
-          if (comp.ballCount === 2) {
-            const [p1, p2] = comp.players;
-            const n1 = netScore(p1, h), n2 = netScore(p2, h);
-            if (n1 == null || n2 == null) return null;
-            if (n1 === n2) return "half";
-            const isP1 = player.id === p1.id;
-            if (n1 < n2) return isP1 ? "won" : "lost";
-            return isP1 ? "lost" : "won";
-          }
-          if (comp.ballCount === 4 && comp.matchType === "singles") {
-            const idx = comp.players.findIndex(p => p.id === player.id);
-            const opponent = comp.players[idx % 2 === 0 ? idx + 1 : idx - 1];
-            const n1 = netScore(player, h), n2 = netScore(opponent, h);
-            if (n1 == null || n2 == null) return null;
-            if (n1 === n2) return "half";
-            return n1 < n2 ? "won" : "lost";
-          }
-          if (comp.ballCount === 4) {
-            const team1 = [comp.players[0], comp.players[1]];
-            const team2 = [comp.players[2], comp.players[3]];
-            const nets1 = team1.map(p => netScore(p, h));
-            const nets2 = team2.map(p => netScore(p, h));
-            if (nets1.some(n => n == null) || nets2.some(n => n == null)) return null;
-            const n1 = Math.min(...nets1), n2 = Math.min(...nets2);
-            if (n1 === n2) return "half";
-            const onTeam1 = team1.some(p => p.id === player.id);
-            if (n1 < n2) return onTeam1 ? "won" : "lost";
-            return onTeam1 ? "lost" : "won";
-          }
-          return null;
-        };
-
         const front = holes.slice(0, 9);
         const back = holes.slice(9, 18);
 
