@@ -4239,48 +4239,80 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       </div>
 
       {/* ── Live Scorecard sheet ── */}
-      {showLiveScorecard && (
-        <div className="sheet-overlay" onClick={() => setShowLiveScorecard(false)}>
-          <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
-            <div className="sheet-handle" />
-            <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
-                <div style={{ fontSize: 11, color: C.steel }}>{holesPlayed}/18 holes · {totalGross || "—"} gross · {totalPts} pts</div>
+      {showLiveScorecard && (() => {
+        // Same "Played To" calculation used when a round is actually
+        // submitted — computed live here so it's available mid-round too,
+        // whenever the tee has rating/slope on record.
+        const liveDifferential = (teeInfo && totalGross) ? scoreDifferential(totalGross, teeInfo.rating, teeInfo.slope) : null;
+        return (
+          <div className="sheet-overlay" onClick={() => setShowLiveScorecard(false)}>
+            <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+              <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>
+                    {new Date(setup.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · {holesPlayed}/18 holes
+                  </div>
+                </div>
+                <button
+                  onClick={shareRoundScorecard}
+                  disabled={sharingRoundScorecard}
+                  style={{ width: 34, height: 34, borderRadius: "50%", border: `1.5px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, opacity: sharingRoundScorecard ? 0.5 : 1 }}
+                  aria-label="Share scorecard"
+                >
+                  <div style={{ width: 16, height: 16, color: C.black }}><Icon.Share /></div>
+                </button>
               </div>
-              <button
-                onClick={shareRoundScorecard}
-                disabled={sharingRoundScorecard}
-                style={{ width: 34, height: 34, borderRadius: "50%", border: `1.5px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, opacity: sharingRoundScorecard ? 0.5 : 1 }}
-                aria-label="Share scorecard"
-              >
-                <div style={{ width: 16, height: 16, color: C.black }}><Icon.Share /></div>
-              </button>
-            </div>
 
-            <RoundScorecardTable label="You" holeSet={course.holes.slice(0, 9)} scores={scores} title="Front Nine" />
-            <RoundScorecardTable label="You" holeSet={course.holes.slice(9, 18)} scores={scores} title="Back Nine" />
+              <div style={{ margin: "0 16px 18px" }}>
+                <LiveRoundSummaryStrip totalPar={totalPar} totalGross={totalGross} totalPts={totalPts} handicap={user.handicap} differential={liveDifferential} />
+              </div>
 
-            <div style={{ padding: "0 16px" }}>
-              <button className="btn btn-primary" onClick={() => setShowLiveScorecard(false)}>Back to Scoring</button>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
+                <LiveHoleGrid holes={course.holes.slice(0, 9)} scores={scores} handicap={user.handicap} />
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
+                <LiveHoleGrid holes={course.holes.slice(9, 18)} scores={scores} handicap={user.handicap} />
+              </div>
+
+              <div style={{ padding: "0 16px" }}>
+                <button className="btn btn-primary" onClick={() => setShowLiveScorecard(false)}>Back to Scoring</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Dedicated off-screen card for the share image — never part of the
           scrollable sheet, so it can't inherit any of its scroll/overflow
           quirks (same reliable pattern used for Competition Mode's share). ── */}
-      {showLiveScorecard && (
-        <div ref={roundShareRef} style={{ position: "fixed", top: 0, left: -9999, width: 380, background: C.white, padding: "16px 0", zIndex: -1 }}>
-          <div style={{ padding: "0 16px 10px" }}>
-            <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
-            <div style={{ fontSize: 11, color: C.steel }}>{holesPlayed}/18 holes · {totalGross || "—"} gross · {totalPts} pts</div>
+      {showLiveScorecard && (() => {
+        const liveDifferential = (teeInfo && totalGross) ? scoreDifferential(totalGross, teeInfo.rating, teeInfo.slope) : null;
+        return (
+          <div ref={roundShareRef} style={{ position: "fixed", top: 0, left: -9999, width: 380, background: C.white, padding: "16px 0", zIndex: -1 }}>
+            <div style={{ padding: "0 16px 10px" }}>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
+              <div style={{ fontSize: 11, color: C.steel }}>
+                {new Date(setup.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · {holesPlayed}/18 holes
+              </div>
+            </div>
+            <div style={{ margin: "0 16px 18px" }}>
+              <LiveRoundSummaryStrip totalPar={totalPar} totalGross={totalGross} totalPts={totalPts} handicap={user.handicap} differential={liveDifferential} />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
+              <LiveHoleGrid holes={course.holes.slice(0, 9)} scores={scores} handicap={user.handicap} />
+            </div>
+            <div style={{ marginBottom: 0 }}>
+              <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
+              <LiveHoleGrid holes={course.holes.slice(9, 18)} scores={scores} handicap={user.handicap} />
+            </div>
           </div>
-          <RoundScorecardTable label="You" holeSet={course.holes.slice(0, 9)} scores={scores} title="Front Nine" />
-          <RoundScorecardTable label="You" holeSet={course.holes.slice(9, 18)} scores={scores} title="Back Nine" />
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -4288,43 +4320,128 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
 // Single-player hole-by-hole scorecard table — shared by the live interactive
 // sheet and the dedicated off-screen share card in PlayRoundFlow, so both
 // always show exactly the same thing.
-function RoundScorecardTable({ label, holeSet, scores, title }) {
-  const grossTotal = holeSet.reduce((s,h) => s + (parseInt(scores[h.n]?.strokes)||0), 0);
+// Live-round summary strip — same visual design and colour thresholds as
+// RoundSummaryStrip (used on submitted rounds in History), adapted to work
+// from live in-progress data instead of a saved round object.
+function LiveRoundSummaryStrip({ totalPar, totalGross, totalPts, handicap, differential }) {
+  const toPar = totalPar && totalGross ? totalGross - totalPar : null;
+  const strokesColor = (() => {
+    if (!totalGross || !totalPar || handicap == null) return C.black;
+    const target = totalPar + handicap;
+    const over = totalGross - target;
+    if (over <= 0) return "#1B7A3D";
+    if (over <= 5) return "#E08A1E";
+    return "#C8392D";
+  })();
+  const pointsColor = (() => {
+    if (totalPts == null) return C.black;
+    if (totalPts >= 36) return "#1B7A3D";
+    if (totalPts >= 30) return "#E08A1E";
+    return "#C8392D";
+  })();
+  const playedToColor = (() => {
+    if (differential == null || handicap == null) return C.black;
+    const diff = differential - handicap;
+    if (diff <= 0) return "#1B7A3D";
+    if (diff <= 5) return "#E08A1E";
+    return "#C8392D";
+  })();
+
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{title}</div>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, tableLayout: "fixed" }}>
+    <div className="round-summary-grid">
+      <div className="round-summary-item">
+        <div className="round-summary-val">{totalPar ?? "—"}</div>
+        <div className="round-summary-lbl">Course Par</div>
+      </div>
+      <div className="round-summary-item">
+        <div className="round-summary-val" style={{ color: strokesColor }}>{totalGross || "—"}</div>
+        <div className="round-summary-lbl">Strokes</div>
+      </div>
+      <div className="round-summary-item">
+        <div className="round-summary-val" style={{ color: pointsColor }}>{totalPts ?? "—"}</div>
+        <div className="round-summary-lbl">Points</div>
+      </div>
+      <div className="round-summary-item">
+        <div className="round-summary-val" style={{ color: toPar == null ? C.black : toPar > 0 ? "#C8392D" : toPar < 0 ? "#1B7A3D" : C.black }}>
+          {toPar == null ? "—" : toPar > 0 ? `+${toPar}` : toPar}
+        </div>
+        <div className="round-summary-lbl">To Par</div>
+      </div>
+      <div className="round-summary-item">
+        <div className="round-summary-val" style={{ color: playedToColor }}>{differential != null ? differential.toFixed(1) : "—"}</div>
+        <div className="round-summary-lbl">Played To</div>
+      </div>
+    </div>
+  );
+}
+
+// Live-round hole grid — same visual design as the History scorecard's
+// HoleGrid (Hole/Par/SI/Gross/Pts/Putts/FIR/GIR, colour-coded), reading from
+// live in-progress scores instead of a saved round object.
+function LiveHoleGrid({ holes, scores, handicap }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, tableLayout: "fixed" }}>
         <thead>
-          <tr style={{ background: C.black }}>
-            <td style={{ padding: "5px 8px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", width: 52 }}>{label}</td>
-            {holeSet.map(h => (
-              <td key={h.n} style={{ padding: "5px 3px", fontWeight: 800, fontSize: 10, color: C.white, textAlign: "center", width: 24 }}>{h.n}</td>
-            ))}
-            <td style={{ padding: "5px 4px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", textAlign: "center", width: 32 }}>Tot</td>
-          </tr>
-          <tr style={{ background: C.charcoal }}>
-            <td style={{ padding: "3px 8px", fontSize: 8.5, color: C.ash }}>Par</td>
-            {holeSet.map(h => (
-              <td key={h.n} style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{h.par}</td>
-            ))}
-            <td style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{holeSet.reduce((s,h)=>s+h.par,0)}</td>
+          <tr style={{ background: C.black, color: C.white }}>
+            <td style={{ padding: "6px 8px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 32 }}>Hole</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>Par</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>SI</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 36 }}>Gross</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 32 }}>Pts</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 36 }}>Putts</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>FIR</td>
+            <td style={{ padding: "6px 4px", fontWeight: 800, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".05em", width: 28 }}>GIR</td>
           </tr>
         </thead>
         <tbody>
-          <tr style={{ background: C.white }}>
-            <td style={{ padding: "4px 8px", fontWeight: 700, fontSize: 10 }}>Strokes</td>
-            {holeSet.map(h => {
-              const gross = parseInt(scores[h.n]?.strokes);
-              return (
-                <td key={h.n} style={{ padding: "3px", textAlign: "center" }}>
-                  <div style={{ fontWeight: 800, fontSize: 10 }}>{gross || "—"}</div>
+          {holes.map((h, i) => {
+            const s = scores[h.n] || {};
+            const gross = parseInt(s.strokes);
+            const pts = gross ? stablefordPts(gross, h.par, handicap || 0, s.si ?? h.si) : null;
+            const isEven = i % 2 === 0;
+            const ptColor = pts == null ? C.steel : pts >= 2 ? "#1B7A3D" : pts === 1 ? "#E08A1E" : "#C8392D";
+            const grossColor = !gross ? "transparent" : (gross - h.par) <= 0 ? "#1B7A3D" : (gross - h.par) === 1 ? "#E08A1E" : "#C8392D";
+            const grossTextColor = gross ? C.white : C.black;
+            return (
+              <tr key={h.n} style={{ background: isEven ? C.white : C.paper }}>
+                <td style={{ padding: "7px 8px", fontWeight: 800 }}>{h.n}</td>
+                <td style={{ padding: "7px 4px", color: C.steel }}>{h.par}</td>
+                <td style={{ padding: "7px 4px", color: C.ash }}>{s.si ?? h.si ?? "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800, background: grossColor, color: grossTextColor, textAlign: "center", outline: "1px solid rgba(0,0,0,0.15)" }}>{gross || "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800, color: ptColor }}>{pts ?? "—"}</td>
+                <td style={{ padding: "7px 4px", color: C.steel }}>{s.putts ?? "—"}</td>
+                <td style={{ padding: "7px 4px" }}>
+                  {h.par >= 4 && s.fir != null ? (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: s.fir ? "#1B7A3D" : "#C8392D" }}>{s.fir ? "✓" : "✗"}</span>
+                  ) : <span style={{ color: C.ash }}>—</span>}
                 </td>
-              );
-            })}
-            <td style={{ padding: "4px", textAlign: "center" }}>
-              <div style={{ fontWeight: 900, fontSize: 11 }}>{grossTotal || "—"}</div>
-            </td>
-          </tr>
+                <td style={{ padding: "7px 4px" }}>
+                  {s.gir != null ? (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: s.gir ? "#1B7A3D" : "#C8392D" }}>{s.gir ? "✓" : "✗"}</span>
+                  ) : <span style={{ color: C.ash }}>—</span>}
+                </td>
+              </tr>
+            );
+          })}
+          {(() => {
+            const grossTotal = holes.reduce((s, h) => s + (parseInt(scores[h.n]?.strokes) || 0), 0);
+            const ptsTotal = holes.reduce((s, h) => {
+              const sc = scores[h.n] || {};
+              const g = parseInt(sc.strokes);
+              return s + (g ? (stablefordPts(g, h.par, handicap || 0, sc.si ?? h.si) || 0) : 0);
+            }, 0);
+            return (
+              <tr style={{ background: C.cloud, borderTop: `1.5px solid ${C.line}` }}>
+                <td colSpan={3} style={{ padding: "7px 8px", fontWeight: 800, fontSize: 10, textTransform: "uppercase", letterSpacing: ".04em", color: C.steel }}>
+                  {holes[0].n <= 9 ? "Out" : "In"}
+                </td>
+                <td style={{ padding: "7px 4px", fontWeight: 800 }}>{grossTotal || "—"}</td>
+                <td style={{ padding: "7px 4px", fontWeight: 800 }}>{ptsTotal || "—"}</td>
+                <td colSpan={3} />
+              </tr>
+            );
+          })()}
         </tbody>
       </table>
     </div>
