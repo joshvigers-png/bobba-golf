@@ -5685,6 +5685,154 @@ function CompCourseFlow({ onBack, onNext }) {
 }
 
 // ─── Competition Scoring Flow ──────────────────────────────────────────────────
+// ─── Dedicated share-image layout ────────────────────────────────────────────
+// Every previous attempt at sharing the leaderboard captured the LIVE,
+// scrollable, animated bottom sheet directly — and kept hitting html2canvas
+// issues tied to that (scroll position, overflow clipping, flex rendering).
+// This is a completely separate, static, always-fully-laid-out version of
+// the same content, rendered off-screen (never visible, never scrollable,
+// never part of the sheet's DOM at all) purely so there's something simple
+// and unambiguous to actually photograph.
+function ShareableLeaderboardCard({ comp, holes, scores, matchResults, playerPts, cardRef }) {
+  const front = holes.slice(0, 9);
+  const back = holes.slice(9, 18);
+
+  const HoleTable = ({ label, holeSet }) => (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, tableLayout: "fixed" }}>
+      <thead>
+        <tr style={{ background: C.black }}>
+          <td style={{ padding: "5px 8px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", width: 52 }}>{label}</td>
+          {holeSet.map(h => (
+            <td key={h.n} style={{ padding: "5px 3px", fontWeight: 800, fontSize: 10, color: C.white, textAlign: "center", width: 24 }}>{h.n}</td>
+          ))}
+          <td style={{ padding: "5px 4px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", textAlign: "center", width: 32 }}>Tot</td>
+        </tr>
+        <tr style={{ background: C.charcoal }}>
+          <td style={{ padding: "3px 8px", fontSize: 8.5, color: C.ash }}>Par</td>
+          {holeSet.map(h => (
+            <td key={h.n} style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{h.par}</td>
+          ))}
+          <td style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{holeSet.reduce((s,h)=>s+h.par,0)}</td>
+        </tr>
+      </thead>
+      <tbody>
+        {comp.players.map((player, pi) => {
+          const grossTotal = holeSet.reduce((s,h) => s + (parseInt(scores[player.id]?.[h.n]?.strokes)||0), 0);
+          const ptsTotal = holeSet.reduce((s,h) => s + (playerPts(player,h)||0), 0);
+          return (
+            <tr key={player.id} style={{ background: pi % 2 === 0 ? C.white : C.paper }}>
+              <td style={{ padding: "4px 8px", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div>{player.name}</div>
+                {comp.format !== "stroke" && <div style={{ fontSize: 8.5, color: C.ash }}>pts/net</div>}
+              </td>
+              {holeSet.map(h => {
+                const gross = parseInt(scores[player.id]?.[h.n]?.strokes);
+                const pts = playerPts(player, h);
+                return (
+                  <td key={h.n} style={{ padding: "3px", textAlign: "center" }}>
+                    <div style={{ fontWeight: 800, fontSize: 10 }}>{gross || "—"}</div>
+                    {comp.format !== "stroke" && <div style={{ fontSize: 8.5, color: C.steel }}>{pts != null ? pts : ""}</div>}
+                  </td>
+                );
+              })}
+              <td style={{ padding: "4px", textAlign: "center" }}>
+                <div style={{ fontWeight: 900, fontSize: 11 }}>{grossTotal || "—"}</div>
+                {comp.format !== "stroke" && <div style={{ fontWeight: 700, fontSize: 9, color: C.steel }}>{ptsTotal || ""}</div>}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  return (
+    <div
+      ref={cardRef}
+      style={{
+        position: "fixed", top: 0, left: -9999, width: 380,
+        background: C.white, padding: "16px 0", zIndex: -1,
+      }}
+    >
+      {matchResults?.map((mr, mi) => (
+        <div key={mi}>
+          {mr.closedResult ? (
+            <div style={{ margin: "0 16px 14px", padding: "12px 16px", background: C.black, textAlign: "center" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,.5)", marginBottom: 4 }}>
+                {matchResults.length > 1 ? `Match ${mi + 1} Result` : "Result"}
+              </div>
+              <div style={{ fontWeight: 900, fontSize: 18, color: C.white }}>{mr.closedResult}</div>
+            </div>
+          ) : (
+            <div style={{ margin: "0 16px 14px" }}>
+              {matchResults.length > 1 && (
+                <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Match {mi + 1}</div>
+              )}
+              <table style={{ width: "100%", borderCollapse: "collapse", border: `1px solid ${C.line}` }}>
+                <tbody>
+                  <tr>
+                    {[mr.p1, mr.p2].map((p, i) => {
+                      const wins = i === 0 ? mr.p1w : mr.p2w;
+                      const isLeading = (i === 0 && mr.diff > 0) || (i === 1 && mr.diff < 0);
+                      return (
+                        <td key={p.id} style={{ width: "33.33%", textAlign: "center", padding: "12px 6px", background: isLeading ? C.black : C.white, borderRight: `1px solid ${C.line}` }}>
+                          <div style={{ fontWeight: 800, fontSize: 10.5, color: isLeading ? C.white : C.steel, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                          <div style={{ fontWeight: 900, fontSize: 26, color: isLeading ? C.white : C.black, lineHeight: 1 }}>{wins}</div>
+                          <div style={{ fontSize: 8.5, color: isLeading ? "rgba(255,255,255,.45)" : C.ash, marginTop: 3 }}>holes won</div>
+                        </td>
+                      );
+                    })}
+                    <td style={{ width: "33.33%", textAlign: "center", padding: "12px 6px", background: C.cloud }}>
+                      <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.ash, marginBottom: 4 }}>Halved</div>
+                      <div style={{ fontWeight: 900, fontSize: 26, color: C.black, lineHeight: 1 }}>{mr.halved}</div>
+                      <div style={{ fontSize: 8.5, color: C.ash, marginTop: 3 }}>holes</div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{ textAlign: "center", padding: "8px 0 0", fontSize: 12, fontWeight: 800, color: C.black }}>
+                {mr.diff === 0 ? "All Square" : `${mr.diff > 0 ? mr.p1.name : mr.p2.name} ${Math.abs(mr.diff)} UP`}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div style={{ padding: "0 16px 10px" }}>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{comp.gameName || comp.courseName}</div>
+        <div style={{ fontSize: 11, color: C.steel }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label}</div>
+      </div>
+
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
+        <HoleTable label="Player" holeSet={front} />
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
+        <HoleTable label="Player" holeSet={back} />
+      </div>
+
+      {comp.format !== "matchplay" && (
+        <div style={{ margin: "0 16px 0", background: C.cloud, padding: "10px 14px" }}>
+          {comp.players.map((p, i) => {
+            const strokes = holes.reduce((s,h) => s + (parseInt(scores[p.id]?.[h.n]?.strokes)||0), 0);
+            const pts = holes.reduce((s,h) => s + (playerPts(p,h)||0), 0);
+            return (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0", borderBottom: i < comp.players.length - 1 ? `1px solid ${C.line}` : "none" }}>
+                <span style={{ fontWeight: 700, fontSize: 12 }}>{p.name}</span>
+                <span style={{ fontWeight: 800, fontSize: 13 }}>
+                  {comp.format === "stableford" ? `${pts} pts` : `${strokes || "—"} strokes`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
   const [currentHole, setCurrentHole] = useState(1);
   const [scores, setScores] = useState(comp.scores || {});
@@ -5700,38 +5848,15 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
   const shareLeaderboard = async () => {
     if (!leaderboardShareRef.current || sharingLeaderboard) return;
     setSharingLeaderboard(true);
-
-    // Resetting scroll position alone wasn't enough — the sheet still has
-    // `overflow-y: auto` and `max-height: 88vh` active during capture,
-    // which can clip or mis-measure anything that would otherwise need
-    // scrolling to see, regardless of scroll position. Removing that
-    // constraint entirely for the moment of capture (then restoring it
-    // in `finally`, so it's undone even if something goes wrong) is what
-    // actually guarantees the full content lays out and gets captured
-    // correctly, with nothing cut off or measured against the wrong bounds.
-    const scrollParent = leaderboardShareRef.current.closest(".sheet");
-    const prevOverflow = scrollParent ? scrollParent.style.overflow : null;
-    const prevMaxHeight = scrollParent ? scrollParent.style.maxHeight : null;
-    const prevScrollTop = scrollParent ? scrollParent.scrollTop : 0;
-
     try {
-      if (scrollParent) {
-        scrollParent.style.overflow = "visible";
-        scrollParent.style.maxHeight = "none";
-        scrollParent.scrollTop = 0;
-      }
-      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
-
+      // Capturing a dedicated, off-screen, always-fully-laid-out element
+      // (never part of the scrollable sheet) means none of the scroll or
+      // overflow workarounds from earlier attempts are needed here — there's
+      // nothing ambiguous left for html2canvas to get wrong.
       const canvas = await html2canvas(leaderboardShareRef.current, {
         backgroundColor: "#ffffff",
         scale: 2, // sharp on retina/mobile screens
         useCORS: true,
-        scrollX: 0,
-        scrollY: -window.scrollY,
-        windowWidth: document.documentElement.offsetWidth,
-        windowHeight: document.documentElement.offsetHeight,
-        width: leaderboardShareRef.current.scrollWidth,
-        height: leaderboardShareRef.current.scrollHeight,
       });
 
       const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
@@ -5757,14 +5882,8 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
       // AbortError just means the person cancelled the native share sheet —
       // not a real error, nothing to report.
       if (e?.name !== "AbortError") console.error("Share leaderboard error:", e);
-    } finally {
-      if (scrollParent) {
-        scrollParent.style.overflow = prevOverflow;
-        scrollParent.style.maxHeight = prevMaxHeight;
-        scrollParent.scrollTop = prevScrollTop;
-      }
-      setSharingLeaderboard(false);
     }
+    setSharingLeaderboard(false);
   };
   const [showSideGame, setShowSideGame] = useState(null);
 
@@ -5794,6 +5913,68 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
     const shots = strokesReceived(player.handicap, scores[player.id]?.[h.n]?.si ?? h.si);
     return gross - shots;
   };
+
+  const playedHoles = holes.filter(h => comp.players.every(p => scores[p.id]?.[h.n]?.strokes));
+  const holesPlayed = playedHoles.length;
+
+  // ── Match play result calculation — 2-ball singles or 4-ball pairs.
+  // p1/p2 in the returned shape represent either an individual player
+  // or a 2-person team, so every downstream display below (which just
+  // reads .name/.id) works unchanged either way. ──
+  // Match result(s) — an array because 4-ball singles produces TWO
+  // independent match results (one per 1v1 pairing) rather than one.
+  // 2-ball and 4-ball pairs always produce a single-entry array, so
+  // the rendering below can treat every format the same way.
+  const matchResults = (() => {
+    if (comp.format !== "matchplay") return null;
+    const computeSubMatch = (p1, p2) => {
+      const sideNet = (side, h) => {
+        const nets = side.members.map(m => netScore(m, h));
+        if (nets.some(n => n == null)) return null;
+        return Math.min(...nets);
+      };
+      let p1w = 0, p2w = 0, halved = 0;
+      let closedAtHole = null, closedResult = null;
+      holes.forEach((h, i) => {
+        const n1 = sideNet(p1, h), n2 = sideNet(p2, h);
+        if (n1 == null || n2 == null) return;
+        if (n1 < n2) p1w++;
+        else if (n2 < n1) p2w++;
+        else halved++;
+        const holesLeft = 17 - i;
+        const diff = p1w - p2w;
+        if (Math.abs(diff) > holesLeft && !closedAtHole) {
+          closedAtHole = h.n;
+          const holesRem = 18 - h.n;
+          const by = Math.abs(diff);
+          const winner = diff > 0 ? p1.name : p2.name;
+          closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
+        }
+      });
+      const diff = p1w - p2w;
+      const allPlayed = holesPlayed === 18;
+      const finalResult = allPlayed && !closedResult
+        ? (diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`)
+        : null;
+      return { p1w, p2w, halved, diff, closedAtHole, closedResult: closedResult || finalResult, p1, p2 };
+    };
+    const mkSide = (p) => ({ id: p.id, name: p.name, members: [p] });
+    if (comp.ballCount === 2) {
+      return [computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1]))];
+    }
+    if (comp.ballCount === 4 && comp.matchType === "singles") {
+      return [
+        computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1])),
+        computeSubMatch(mkSide(comp.players[2]), mkSide(comp.players[3])),
+      ];
+    }
+    if (comp.ballCount === 4) {
+      const p1 = { id: "team1", name: `${comp.players[0].name} & ${comp.players[1].name}`, members: [comp.players[0], comp.players[1]] };
+      const p2 = { id: "team2", name: `${comp.players[2].name} & ${comp.players[3].name}`, members: [comp.players[2], comp.players[3]] };
+      return [computeSubMatch(p1, p2)];
+    }
+    return null;
+  })();
 
   // ── Leaderboard calculations ──
   const leaderboard = () => {
@@ -6060,69 +6241,18 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
       </div>
 
       {/* Leaderboard sheet */}
+      {showLeaderboard && (
+        <ShareableLeaderboardCard
+          comp={comp}
+          holes={holes}
+          scores={scores}
+          matchResults={matchResults}
+          playerPts={playerPts}
+          cardRef={leaderboardShareRef}
+        />
+      )}
+
       {showLeaderboard && (() => {
-        const playedHoles = holes.filter(h => comp.players.every(p => scores[p.id]?.[h.n]?.strokes));
-        const holesPlayed = playedHoles.length;
-
-        // ── Match play result calculation — 2-ball singles or 4-ball pairs.
-        // p1/p2 in the returned shape represent either an individual player
-        // or a 2-person team, so every downstream display below (which just
-        // reads .name/.id) works unchanged either way. ──
-        // Match result(s) — an array because 4-ball singles produces TWO
-        // independent match results (one per 1v1 pairing) rather than one.
-        // 2-ball and 4-ball pairs always produce a single-entry array, so
-        // the rendering below can treat every format the same way.
-        const matchResults = (() => {
-          if (comp.format !== "matchplay") return null;
-          const computeSubMatch = (p1, p2) => {
-            const sideNet = (side, h) => {
-              const nets = side.members.map(m => netScore(m, h));
-              if (nets.some(n => n == null)) return null;
-              return Math.min(...nets);
-            };
-            let p1w = 0, p2w = 0, halved = 0;
-            let closedAtHole = null, closedResult = null;
-            holes.forEach((h, i) => {
-              const n1 = sideNet(p1, h), n2 = sideNet(p2, h);
-              if (n1 == null || n2 == null) return;
-              if (n1 < n2) p1w++;
-              else if (n2 < n1) p2w++;
-              else halved++;
-              const holesLeft = 17 - i;
-              const diff = p1w - p2w;
-              if (Math.abs(diff) > holesLeft && !closedAtHole) {
-                closedAtHole = h.n;
-                const holesRem = 18 - h.n;
-                const by = Math.abs(diff);
-                const winner = diff > 0 ? p1.name : p2.name;
-                closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
-              }
-            });
-            const diff = p1w - p2w;
-            const allPlayed = holesPlayed === 18;
-            const finalResult = allPlayed && !closedResult
-              ? (diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`)
-              : null;
-            return { p1w, p2w, halved, diff, closedAtHole, closedResult: closedResult || finalResult, p1, p2 };
-          };
-          const mkSide = (p) => ({ id: p.id, name: p.name, members: [p] });
-          if (comp.ballCount === 2) {
-            return [computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1]))];
-          }
-          if (comp.ballCount === 4 && comp.matchType === "singles") {
-            return [
-              computeSubMatch(mkSide(comp.players[0]), mkSide(comp.players[1])),
-              computeSubMatch(mkSide(comp.players[2]), mkSide(comp.players[3])),
-            ];
-          }
-          if (comp.ballCount === 4) {
-            const p1 = { id: "team1", name: `${comp.players[0].name} & ${comp.players[1].name}`, members: [comp.players[0], comp.players[1]] };
-            const p2 = { id: "team2", name: `${comp.players[2].name} & ${comp.players[3].name}`, members: [comp.players[2], comp.players[3]] };
-            return [computeSubMatch(p1, p2)];
-          }
-          return null;
-        })();
-
         // Per-player hole result — works the same way for 2-ball singles,
         // 4-ball pairs (best ball per team), and 4-ball singles (each
         // player judged only against their own designated opponent).
@@ -6231,7 +6361,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
             <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
               <div className="sheet-handle" />
 
-              <div ref={leaderboardShareRef} style={{ background: C.white }}>
+              <div style={{ background: C.white }}>
               {/* Match result banner(s) — one per sub-match */}
               {matchResults?.map((mr, mi) => (
                 <div key={mi}>
