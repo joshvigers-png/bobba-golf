@@ -250,6 +250,27 @@ function clearActiveRoundEverywhere(uid) {
 // Pulls the real data down from Firestore into the local cache — called
 // right after login so every device/browser always starts from the actual
 // saved data, not whatever (if anything) happens to be in local storage.
+// Merges local and Firestore copies of a list by id, keeping whichever
+// side has the more recent `lastModified` (or whichever exists at all, if
+// only one side has it). Used specifically to stop a login-time refresh
+// from silently overwriting more recent local progress with a stale
+// Firestore copy — e.g. if the app was fully closed before a background
+// sync finished. Returns the merged list, plus whichever items need to be
+// pushed back to Firestore to catch it up (self-healing).
+function mergeByRecency(localList, remoteList) {
+  const byId = new Map();
+  (remoteList || []).forEach(item => byId.set(item.id, item));
+  const toResync = [];
+  (localList || []).forEach(localItem => {
+    const remoteItem = byId.get(localItem.id);
+    if (!remoteItem || (localItem.lastModified || 0) > (remoteItem.lastModified || 0)) {
+      byId.set(localItem.id, localItem);
+      toResync.push(localItem);
+    }
+  });
+  return { merged: Array.from(byId.values()), toResync };
+}
+
 async function loadUserDataIntoCache(uid) {
   try {
     const [rounds, goals, comps, activeRound] = await Promise.all([
@@ -260,12 +281,20 @@ async function loadUserDataIntoCache(uid) {
     ]);
     LS.set(`bb_rounds_${uid}`, rounds);
     LS.set(`bb_goals_${uid}`, goals);
-    LS.set(`bb_comps_${uid}`, comps);
+    // Comps specifically get a recency-aware merge rather than a blind
+    // overwrite — an in-progress game saves locally on every hole, but the
+    // matching Firestore write happens in the background and can lose the
+    // race if the app is closed quickly. Blindly trusting Firestore here
+    // was silently erasing that in-progress local data on next launch.
+    const localComps = LS.get(`bb_comps_${uid}`) || [];
+    const { merged: mergedComps, toResync } = mergeByRecency(localComps, comps);
+    LS.set(`bb_comps_${uid}`, mergedComps);
+    toResync.forEach(c => DB.setComp(uid, c).catch(() => {}));
     if (activeRound) LS.set(`bb_active_round_${uid}`, activeRound);
     else LS.del(`bb_active_round_${uid}`);
     // Self-heal the headline counts on every login, in case they ever drift
     // out of sync with the real subcollections for any reason.
-    DB.updateUser(uid, { roundsCount: rounds.length, compsCount: comps.length }).catch(() => {});
+    DB.updateUser(uid, { roundsCount: rounds.length, compsCount: mergedComps.length }).catch(() => {});
   } catch (err) {
     // If this fails (e.g. offline), fall back to whatever's already cached
     // locally rather than blocking login entirely.
@@ -5140,14 +5169,15 @@ function CompetitionScreen({ user, onBack }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const saveComp = (comp) => {
-    const next = [...comps, comp];
+    const next = [...comps, { ...comp, lastModified: Date.now() }];
     persist(next);
   };
 
   const updateComp = (comp) => {
-    const next = comps.map(c => c.id === comp.id ? comp : c);
+    const stamped = { ...comp, lastModified: Date.now() };
+    const next = comps.map(c => c.id === comp.id ? stamped : c);
     persist(next);
-    setActiveComp(comp);
+    setActiveComp(stamped);
   };
 
   // ── Home ──
