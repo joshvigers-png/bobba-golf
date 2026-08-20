@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import html2canvas from "html2canvas";
 import { initializeApp } from "firebase/app";
 import {
   initializeAuth,
@@ -907,6 +908,7 @@ const Icon = {
   Trophy:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5C3 9.5 4.5 11 7 11M17 6h2.5A1.5 1.5 0 0 1 21 7.5c0 2-1.5 3.5-4 3.5"/><path d="M9 20h6M12 15v5"/></svg>,
   ChevronRight:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6"/></svg>,
   Plus:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>,
+  Share:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3v12M12 3l-4 4M12 3l4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg>,
   Clock:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>,
   Bag:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M8 7V5a4 4 0 0 1 8 0v2"/><rect x="4" y="7" width="16" height="14" rx="2"/></svg>,
   Bell:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M9.5 20a2.5 2.5 0 0 0 5 0"/></svg>,
@@ -5639,6 +5641,48 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
   const [scores, setScores] = useState(comp.scores || {});
   const [sideGameWinners, setSideGameWinners] = useState(comp.sideGameWinners || {});
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const leaderboardShareRef = useRef(null);
+  const [sharingLeaderboard, setSharingLeaderboard] = useState(false);
+
+  // Captures the leaderboard sheet exactly as it looks in the app and
+  // shares it as a real image — via the phone's native share sheet
+  // (WhatsApp, Messages, etc.) where supported, falling back to a direct
+  // download if the browser can't share files.
+  const shareLeaderboard = async () => {
+    if (!leaderboardShareRef.current || sharingLeaderboard) return;
+    setSharingLeaderboard(true);
+    try {
+      const canvas = await html2canvas(leaderboardShareRef.current, {
+        backgroundColor: "#ffffff",
+        scale: 2, // sharp on retina/mobile screens
+        useCORS: true,
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      const fileName = `${(comp.gameName || comp.courseName || "leaderboard").replace(/[^a-z0-9]+/gi, "-")}.png`;
+      const file = new File([blob], fileName, { type: "image/png" });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: comp.gameName || comp.courseName || "Leaderboard",
+        });
+      } else {
+        // Fallback for browsers that can't share files (mostly desktop) —
+        // just download the image so it can be shared manually.
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      // AbortError just means the person cancelled the native share sheet —
+      // not a real error, nothing to report.
+      if (e?.name !== "AbortError") console.error("Share leaderboard error:", e);
+    }
+    setSharingLeaderboard(false);
+  };
   const [showSideGame, setShowSideGame] = useState(null);
 
   const course = comp.course;
@@ -6104,6 +6148,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
             <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
               <div className="sheet-handle" />
 
+              <div ref={leaderboardShareRef} style={{ background: C.white }}>
               {/* Match result banner(s) — one per sub-match */}
               {matchResults?.map((mr, mi) => (
                 <div key={mi}>
@@ -6147,9 +6192,20 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
               ))}
 
               {/* Header */}
-              <div style={{ padding: "0 16px 10px" }}>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>{comp.gameName || comp.courseName}</div>
-                <div style={{ fontSize: 11, color: C.steel }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · {holesPlayed} hole{holesPlayed !== 1 ? "s" : ""} played</div>
+              <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{comp.gameName || comp.courseName}</div>
+                  <div style={{ fontSize: 11, color: C.steel }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · {holesPlayed} hole{holesPlayed !== 1 ? "s" : ""} played</div>
+                </div>
+                <button
+                  onClick={shareLeaderboard}
+                  disabled={sharingLeaderboard}
+                  data-html2canvas-ignore="true"
+                  style={{ width: 34, height: 34, borderRadius: "50%", border: `1.5px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, opacity: sharingLeaderboard ? 0.5 : 1 }}
+                  aria-label="Share leaderboard"
+                >
+                  <div style={{ width: 16, height: 16, color: C.black }}><Icon.Share /></div>
+                </button>
               </div>
 
               {/* Scorecard grid — front 9 */}
@@ -6181,6 +6237,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
                   })}
                 </div>
               )}
+              </div>
 
               <div style={{ padding: "0 16px" }}>
                 <button className="btn btn-primary" onClick={() => setShowLeaderboard(false)}>Back to Scoring</button>
