@@ -3476,6 +3476,9 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const [scores, setScores] = useState(savedIsValid ? savedActive.scores : {});
   const [submittedRound, setSubmittedRound] = useState(null);
   const [preScanCourse, setPreScanCourse] = useState(null); // API course being improved by scan
+  const [showLiveScorecard, setShowLiveScorecard] = useState(false);
+  const roundShareRef = useRef(null);
+  const [sharingRoundScorecard, setSharingRoundScorecard] = useState(false);
 
   // ── Live course search (via the secure proxy — see /home/claude/golf-proxy) ──
   // Note: GolfCourseAPI's search is name/club text-based only — it doesn't
@@ -3678,6 +3681,40 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   };
   const outNine = course ? nineSplit(course.holes.slice(0,9)) : { played:0, gross:0, pts:0 };
   const inNine  = course ? nineSplit(course.holes.slice(9,18)) : { played:0, gross:0, pts:0 };
+
+  // Captures the dedicated off-screen scorecard card (never the live,
+  // scrollable screen itself) and shares it as a real image — same
+  // reliable pattern already proven out for Competition Mode's leaderboard
+  // share, which needed several attempts to get right for exactly this
+  // reason: capturing live scrollable UI directly is unreliable.
+  const shareRoundScorecard = async () => {
+    if (!roundShareRef.current || sharingRoundScorecard) return;
+    setSharingRoundScorecard(true);
+    try {
+      const canvas = await html2canvas(roundShareRef.current, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      const fileName = `${(course?.name || "scorecard").replace(/[^a-z0-9]+/gi, "-")}.png`;
+      const file = new File([blob], fileName, { type: "image/png" });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: course?.name || "Scorecard" });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      if (e?.name !== "AbortError") console.error("Share scorecard error:", e);
+    }
+    setSharingRoundScorecard(false);
+  };
 
   const finishRound = () => {
     const adjGross = totalGross || totalPar; // fallback safety
@@ -4160,6 +4197,12 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         <button onClick={onBack} style={{ background: "none", border: "none", color: "#5C5C5C", fontSize: 12.5, cursor: "pointer", marginBottom: 10, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Save & Exit
         </button>
+        <button
+          onClick={() => setShowLiveScorecard(true)}
+          style={{ position: "absolute", top: 20, right: 22, zIndex: 1, background: C.black, color: C.white, border: "none", padding: "9px 14px", fontSize: 11.5, fontWeight: 800, cursor: "pointer" }}
+        >
+          Live Scorecard
+        </button>
         <h1 style={{ fontSize: 22 }}>{course.name}</h1>
         <p>{teeKey ? `${teeKey.charAt(0).toUpperCase()+teeKey.slice(1)} tees · ` : ""}Par {totalPar}{totalYds ? ` · ${totalYds}y` : ""} · {setup.conditions}</p>
       </div>
@@ -4194,6 +4237,96 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
           <p style={{ textAlign: "center", fontSize: 11, color: C.steel, marginTop: 10 }}>{18-holesPlayed} holes not yet scored — you can still submit.</p>
         )}
       </div>
+
+      {/* ── Live Scorecard sheet ── */}
+      {showLiveScorecard && (
+        <div className="sheet-overlay" onClick={() => setShowLiveScorecard(false)}>
+          <div className="sheet" style={{ padding: "16px 0 24px" }} onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
+                <div style={{ fontSize: 11, color: C.steel }}>{holesPlayed}/18 holes · {totalGross || "—"} gross · {totalPts} pts</div>
+              </div>
+              <button
+                onClick={shareRoundScorecard}
+                disabled={sharingRoundScorecard}
+                style={{ width: 34, height: 34, borderRadius: "50%", border: `1.5px solid ${C.line}`, background: C.white, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, opacity: sharingRoundScorecard ? 0.5 : 1 }}
+                aria-label="Share scorecard"
+              >
+                <div style={{ width: 16, height: 16, color: C.black }}><Icon.Share /></div>
+              </button>
+            </div>
+
+            <RoundScorecardTable label="You" holeSet={course.holes.slice(0, 9)} scores={scores} title="Front Nine" />
+            <RoundScorecardTable label="You" holeSet={course.holes.slice(9, 18)} scores={scores} title="Back Nine" />
+
+            <div style={{ padding: "0 16px" }}>
+              <button className="btn btn-primary" onClick={() => setShowLiveScorecard(false)}>Back to Scoring</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Dedicated off-screen card for the share image — never part of the
+          scrollable sheet, so it can't inherit any of its scroll/overflow
+          quirks (same reliable pattern used for Competition Mode's share). ── */}
+      {showLiveScorecard && (
+        <div ref={roundShareRef} style={{ position: "fixed", top: 0, left: -9999, width: 380, background: C.white, padding: "16px 0", zIndex: -1 }}>
+          <div style={{ padding: "0 16px 10px" }}>
+            <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
+            <div style={{ fontSize: 11, color: C.steel }}>{holesPlayed}/18 holes · {totalGross || "—"} gross · {totalPts} pts</div>
+          </div>
+          <RoundScorecardTable label="You" holeSet={course.holes.slice(0, 9)} scores={scores} title="Front Nine" />
+          <RoundScorecardTable label="You" holeSet={course.holes.slice(9, 18)} scores={scores} title="Back Nine" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Single-player hole-by-hole scorecard table — shared by the live interactive
+// sheet and the dedicated off-screen share card in PlayRoundFlow, so both
+// always show exactly the same thing.
+function RoundScorecardTable({ label, holeSet, scores, title }) {
+  const grossTotal = holeSet.reduce((s,h) => s + (parseInt(scores[h.n]?.strokes)||0), 0);
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{title}</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, tableLayout: "fixed" }}>
+        <thead>
+          <tr style={{ background: C.black }}>
+            <td style={{ padding: "5px 8px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", width: 52 }}>{label}</td>
+            {holeSet.map(h => (
+              <td key={h.n} style={{ padding: "5px 3px", fontWeight: 800, fontSize: 10, color: C.white, textAlign: "center", width: 24 }}>{h.n}</td>
+            ))}
+            <td style={{ padding: "5px 4px", fontWeight: 800, fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,.6)", textAlign: "center", width: 32 }}>Tot</td>
+          </tr>
+          <tr style={{ background: C.charcoal }}>
+            <td style={{ padding: "3px 8px", fontSize: 8.5, color: C.ash }}>Par</td>
+            {holeSet.map(h => (
+              <td key={h.n} style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{h.par}</td>
+            ))}
+            <td style={{ padding: "3px", fontSize: 9, color: C.fog, textAlign: "center" }}>{holeSet.reduce((s,h)=>s+h.par,0)}</td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={{ background: C.white }}>
+            <td style={{ padding: "4px 8px", fontWeight: 700, fontSize: 10 }}>Strokes</td>
+            {holeSet.map(h => {
+              const gross = parseInt(scores[h.n]?.strokes);
+              return (
+                <td key={h.n} style={{ padding: "3px", textAlign: "center" }}>
+                  <div style={{ fontWeight: 800, fontSize: 10 }}>{gross || "—"}</div>
+                </td>
+              );
+            })}
+            <td style={{ padding: "4px", textAlign: "center" }}>
+              <div style={{ fontWeight: 900, fontSize: 11 }}>{grossTotal || "—"}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }
