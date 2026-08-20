@@ -5690,6 +5690,8 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
         scrollY: -window.scrollY,
         windowWidth: document.documentElement.offsetWidth,
         windowHeight: document.documentElement.offsetHeight,
+        width: leaderboardShareRef.current.scrollWidth,
+        height: leaderboardShareRef.current.scrollHeight,
       });
 
       if (scrollParent) scrollParent.scrollTop = prevScrollTop;
@@ -6201,24 +6203,28 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
                       {matchResults.length > 1 && (
                         <div style={{ fontSize: 10, fontWeight: 800, color: C.steel, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Match {mi + 1}</div>
                       )}
-                      <div style={{ display: "flex", border: `1px solid ${C.line}` }}>
-                        {[mr.p1, mr.p2].map((p, i) => {
-                          const wins = i === 0 ? mr.p1w : mr.p2w;
-                          const isLeading = (i === 0 && mr.diff > 0) || (i === 1 && mr.diff < 0);
-                          return (
-                            <div key={p.id} style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: isLeading ? C.black : C.white, borderRight: `1px solid ${C.line}` }}>
-                              <div style={{ fontWeight: 800, fontSize: 10.5, color: isLeading ? C.white : C.steel, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-                              <div style={{ fontWeight: 900, fontSize: 26, color: isLeading ? C.white : C.black, lineHeight: 1 }}>{wins}</div>
-                              <div style={{ fontSize: 8.5, color: isLeading ? "rgba(255,255,255,.45)" : C.ash, marginTop: 3 }}>holes won</div>
-                            </div>
-                          );
-                        })}
-                        <div style={{ flex: 1, textAlign: "center", padding: "12px 6px", background: C.cloud }}>
-                          <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.ash, marginBottom: 4 }}>Halved</div>
-                          <div style={{ fontWeight: 900, fontSize: 26, color: C.black, lineHeight: 1 }}>{mr.halved}</div>
-                          <div style={{ fontSize: 8.5, color: C.ash, marginTop: 3 }}>holes</div>
-                        </div>
-                      </div>
+                      <table style={{ width: "100%", borderCollapse: "collapse", border: `1px solid ${C.line}` }}>
+                        <tbody>
+                          <tr>
+                            {[mr.p1, mr.p2].map((p, i) => {
+                              const wins = i === 0 ? mr.p1w : mr.p2w;
+                              const isLeading = (i === 0 && mr.diff > 0) || (i === 1 && mr.diff < 0);
+                              return (
+                                <td key={p.id} style={{ width: "33.33%", textAlign: "center", padding: "12px 6px", background: isLeading ? C.black : C.white, borderRight: `1px solid ${C.line}` }}>
+                                  <div style={{ fontWeight: 800, fontSize: 10.5, color: isLeading ? C.white : C.steel, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                                  <div style={{ fontWeight: 900, fontSize: 26, color: isLeading ? C.white : C.black, lineHeight: 1 }}>{wins}</div>
+                                  <div style={{ fontSize: 8.5, color: isLeading ? "rgba(255,255,255,.45)" : C.ash, marginTop: 3 }}>holes won</div>
+                                </td>
+                              );
+                            })}
+                            <td style={{ width: "33.33%", textAlign: "center", padding: "12px 6px", background: C.cloud }}>
+                              <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", color: C.ash, marginBottom: 4 }}>Halved</div>
+                              <div style={{ fontWeight: 900, fontSize: 26, color: C.black, lineHeight: 1 }}>{mr.halved}</div>
+                              <div style={{ fontSize: 8.5, color: C.ash, marginTop: 3 }}>holes</div>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
                       {/* Match status below the boxes */}
                       <div style={{ textAlign: "center", padding: "8px 0 0", fontSize: 12, fontWeight: 800, color: C.black }}>
                         {mr.diff === 0 ? "All Square" : `${mr.diff > 0 ? mr.p1.name : mr.p2.name} ${Math.abs(mr.diff)} UP`}
