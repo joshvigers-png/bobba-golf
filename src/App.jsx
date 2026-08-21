@@ -6265,6 +6265,11 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
     : comp.holesFormat === "back9" ? allHoles.slice(9, 18)
     : allHoles;
   const hole = holes.find(h => h.n === currentHole) || holes[0];
+  // Actual navigable range for this round — 1-9, 10-18, or 1-18 depending
+  // on the selected holes format. Navigation and the Finish button must
+  // respect these, not always assume a full 1-18 range.
+  const minHoleN = holes[0]?.n ?? 1;
+  const maxHoleN = holes[holes.length - 1]?.n ?? 18;
 
   const updateScore = (playerId, field, val) => {
     const next = { ...scores, [playerId]: { ...(scores[playerId]||{}), [hole.n]: { ...(scores[playerId]?.[hole.n]||{}), [field]: val } } };
@@ -6316,18 +6321,18 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
         if (n1 < n2) p1w++;
         else if (n2 < n1) p2w++;
         else halved++;
-        const holesLeft = 17 - i;
+        const holesLeft = (holes.length - 1) - i;
         const diff = p1w - p2w;
         if (Math.abs(diff) > holesLeft && !closedAtHole) {
           closedAtHole = h.n;
-          const holesRem = 18 - h.n;
+          const holesRem = holes.length - (i + 1);
           const by = Math.abs(diff);
           const winner = diff > 0 ? p1.name : p2.name;
           closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
         }
       });
       const diff = p1w - p2w;
-      const allPlayed = holesPlayed === 18;
+      const allPlayed = holesPlayed === holes.length;
       const finalResult = allPlayed && !closedResult
         ? (diff === 0 ? "Match Halved" : `${diff > 0 ? p1.name : p2.name} wins 1 UP`)
         : null;
@@ -6417,7 +6422,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
           else halved++;
         });
         const diff = p1wins - p2wins;
-        const holesLeft = 18 - (playedHoles.length);
+        const holesLeft = holes.length - (playedHoles.length);
         const status = diff === 0 ? "All Square" : diff > 0 ? `${p1.name} ${diff} UP` : `${p2.name} ${Math.abs(diff)} UP`;
         const dormie = Math.abs(diff) > 0 && Math.abs(diff) === holesLeft;
         return [
@@ -6494,7 +6499,7 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
         </button>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 800, fontSize: 14, color: C.white }}>{comp.gameName || comp.courseName}</div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,.5)" }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · Hole {currentHole}/18</div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,.5)" }}>{COMP_FORMATS.find(f=>f.id===comp.format)?.label} · Hole {holes.findIndex(h=>h.n===currentHole)+1}/{holes.length}</div>
         </div>
         <button onClick={() => setShowLeaderboard(true)} style={{ background: "rgba(255,255,255,.12)", border: "none", color: C.white, padding: "6px 12px", fontWeight: 800, fontSize: 11, cursor: "pointer", borderRadius: 4 }}>
           Leaderboard
@@ -6503,14 +6508,14 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
 
       {/* Hole header */}
       <div style={{ padding: "16px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button onClick={() => setCurrentHole(h => Math.max(1, h-1))} disabled={currentHole === 1} style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: currentHole === 1 ? 0.3 : 1 }}>
+        <button onClick={() => setCurrentHole(h => Math.max(minHoleN, h-1))} disabled={currentHole === minHoleN} style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: currentHole === minHoleN ? 0.3 : 1 }}>
           <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div>
         </button>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontWeight: 900, fontSize: 32, lineHeight: 1 }}>{currentHole}</div>
           <div style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>Par {hole.par} · SI {hole.si}</div>
         </div>
-        <button onClick={() => setCurrentHole(h => Math.min(18, h+1))} disabled={currentHole === 18} style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: currentHole === 18 ? 0.3 : 1 }}>
+        <button onClick={() => setCurrentHole(h => Math.min(maxHoleN, h+1))} disabled={currentHole === maxHoleN} style={{ width: 36, height: 36, borderRadius: "50%", background: C.cloud, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: currentHole === maxHoleN ? 0.3 : 1 }}>
           <div style={{ width: 14, height: 14 }}><Icon.ChevronRight /></div>
         </button>
       </div>
@@ -6645,8 +6650,8 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
 
       {/* Navigation + finish */}
       <div style={{ padding: "0 18px", display: "flex", gap: 10 }}>
-        {currentHole < 18 ? (
-          <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setCurrentHole(h => h + 1)}>Next Hole →</button>
+        {currentHole < maxHoleN ? (
+          <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setCurrentHole(h => Math.min(maxHoleN, h + 1))}>Next Hole →</button>
         ) : (
           <button className="btn btn-primary" style={{ flex: 1, background: "#1B7A3D" }} onClick={handleFinish}>Finish Round</button>
         )}
@@ -6922,10 +6927,10 @@ function CompDetailView({ comp, onBack, onResume }) {
         if (n1 < n2) p1w++;
         else if (n2 < n1) p2w++;
         else halved++;
-        const holesLeft = 17 - i;
+        const holesLeft = (holes.length - 1) - i;
         const diff = p1w - p2w;
         if (Math.abs(diff) > holesLeft && !closedResult) {
-          const holesRem = 18 - h.n;
+          const holesRem = holes.length - (i + 1);
           const by = Math.abs(diff);
           const winner = diff > 0 ? p1.name : p2.name;
           closedResult = holesRem > 0 ? `${winner} wins ${by}&${holesRem}` : `${winner} wins ${by} UP`;
