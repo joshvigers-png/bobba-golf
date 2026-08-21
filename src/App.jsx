@@ -521,6 +521,20 @@ function stablefordPts(gross, par, hcp, si) {
 function scoreDifferential(adjGross, rating, slope) {
   return Math.round(((113 / slope) * (adjGross - rating)) * 10) / 10;
 }
+// A 9-hole round's differential, combined with a synthetic "expected" score
+// for the unplayed 9 (half the player's current Handicap Index) to produce
+// an 18-hole-equivalent differential — the simplified version of the
+// official WHS 9-hole method (which would otherwise pair two real 9-hole
+// rounds together when available). Uses half the 18-hole Course Rating as
+// an approximation for the 9-hole rating, since separate 9-hole ratings
+// aren't reliably available for every course in this app.
+function nineHoleSyntheticDifferential(nineHoleGross, rating18, slope, currentHandicapIndex) {
+  if (nineHoleGross == null || rating18 == null || slope == null || currentHandicapIndex == null) return null;
+  const rating9 = rating18 / 2;
+  const nineDiff = (113 / slope) * (nineHoleGross - rating9);
+  const syntheticHalf = currentHandicapIndex / 2;
+  return Math.round((nineDiff + syntheticHalf) * 10) / 10;
+}
 // Net new handicap index from a list of differentials (most recent last), per WHS table
 function calcHandicapIndex(diffs) {
   const n = diffs.length;
@@ -2815,6 +2829,10 @@ function WHSInfoSheet({ onClose }) {
             title: "5. Why can my index drop after a bad round?",
             body: "It can't — a bad round simply won't be one of your best differentials, so it won't factor in. Your index can drop if a new good round enters your best-N pool, or if Recalculate corrects an earlier error."
           },
+          {
+            title: "6. How do 9-hole rounds count?",
+            body: "A 9-hole round gets combined with an assumed average score (half your current handicap index) for the 9 you didn't play, producing a full 18-hole-equivalent differential — which then counts toward your index exactly like any other round. This is a simplified version of the official method, which would ideally pair two real 9-hole rounds together when available. Over time the difference between the two approaches is small."
+          },
         ].map(({ title, body }) => (
           <div key={title} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${C.line}` }}>
             <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 5 }}>{title}</div>
@@ -3472,7 +3490,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   const [step, setStep] = useState(savedIsValid ? "card" : "search");
   const [query, setQuery] = useState("");
   const [course, setCourse] = useState(savedIsValid ? savedActive.course : null);
-  const [setup, setSetup] = useState(savedIsValid ? savedActive.setup : { date: new Date().toISOString().slice(0,10), tee: "white", conditions: "Dry" });
+  const [setup, setSetup] = useState(savedIsValid ? savedActive.setup : { date: new Date().toISOString().slice(0,10), tee: "white", conditions: "Dry", holesFormat: "full18" });
   const [scores, setScores] = useState(savedIsValid ? savedActive.scores : {});
   const [submittedRound, setSubmittedRound] = useState(null);
   const [preScanCourse, setPreScanCourse] = useState(null); // API course being improved by scan
@@ -3654,18 +3672,27 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
 
   const teeKey = setup.tee;
   const teeInfo = course?.tees?.[teeKey];
-  const totalPar = course ? course.holes.reduce((s,h)=>s+h.par,0) : 0;
-  const totalYds = course ? course.holes.reduce((s,h)=>s+(h.yds[teeKey]||0),0) : 0;
-  const holesPlayed = course ? course.holes.filter(h => scores[h.n]?.strokes).length : 0;
-  const totalGross = course ? course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0) : 0;
-  const totalPts = course ? course.holes.reduce((s,h)=>{
+  // Only the holes actually being played this round — everything below
+  // (totals, live scorecard, submission) works off this, not the full
+  // course.holes array, so Front 9 / Back 9 rounds only ever see and total
+  // their own 9. Defaults to the full course for existing behaviour.
+  const activeHoles = course
+    ? (setup.holesFormat === "front9" ? course.holes.slice(0, 9)
+      : setup.holesFormat === "back9" ? course.holes.slice(9, 18)
+      : course.holes)
+    : [];
+  const totalPar = activeHoles.reduce((s,h)=>s+h.par,0);
+  const totalYds = activeHoles.reduce((s,h)=>s+(h.yds[teeKey]||0),0);
+  const holesPlayed = activeHoles.filter(h => scores[h.n]?.strokes).length;
+  const totalGross = activeHoles.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0);
+  const totalPts = activeHoles.reduce((s,h)=>{
     const st = parseInt(scores[h.n]?.strokes);
     const effectiveSi = scores[h.n]?.si ?? h.si;
     const p = st ? stablefordPts(st, h.par, user.handicap || 0, effectiveSi) : 0;
     return s + (p||0);
-  },0) : 0;
-  const totalPutts = course ? course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.putts)||0),0) : 0;
-  const totalLost = course ? course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.lost)||0),0) : 0;
+  },0);
+  const totalPutts = activeHoles.reduce((s,h)=>s+(parseInt(scores[h.n]?.putts)||0),0);
+  const totalLost = activeHoles.reduce((s,h)=>s+(parseInt(scores[h.n]?.lost)||0),0);
 
   // Front/back nine splits
   const nineSplit = (holesSubset) => {
@@ -3679,8 +3706,8 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
     },0);
     return { played, gross, pts };
   };
-  const outNine = course ? nineSplit(course.holes.slice(0,9)) : { played:0, gross:0, pts:0 };
-  const inNine  = course ? nineSplit(course.holes.slice(9,18)) : { played:0, gross:0, pts:0 };
+  const outNine = setup.holesFormat !== "back9" ? nineSplit(activeHoles.slice(0,9)) : { played:0, gross:0, pts:0 };
+  const inNine  = setup.holesFormat === "full18" ? nineSplit(activeHoles.slice(9,18)) : (setup.holesFormat === "back9" ? nineSplit(activeHoles) : { played:0, gross:0, pts:0 });
 
   // Captures the dedicated off-screen scorecard card (never the live,
   // scrollable screen itself) and shares it as a real image — same
@@ -3718,7 +3745,12 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
 
   const finishRound = () => {
     const adjGross = totalGross || totalPar; // fallback safety
-    const diff = teeInfo ? scoreDifferential(adjGross, teeInfo.rating, teeInfo.slope) : null;
+    const holesFormat = setup.holesFormat || "full18";
+    const diff = teeInfo
+      ? (holesFormat === "full18"
+          ? scoreDifferential(adjGross, teeInfo.rating, teeInfo.slope)
+          : nineHoleSyntheticDifferential(adjGross, teeInfo.rating, teeInfo.slope, user.handicap))
+      : null;
     const rounds = LS.get(`bb_rounds_${user.id}`) || [];
     const record = {
       id: Date.now(),
@@ -3726,7 +3758,7 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
       course, // full snapshot (holes, pars, stroke indices, yardages, tees) so this
               // round can always be re-displayed later, even if the source course
               // was fetched live from the API and never lived in COURSE_DB
-      date: setup.date, conditions: setup.conditions,
+      date: setup.date, conditions: setup.conditions, holesFormat,
       scores, totalGross, totalPts, totalPutts, totalLost, holesPlayed,
       rating: teeInfo?.rating, slope: teeInfo?.slope, differential: diff,
       coursePar: totalPar, handicapPlayed: user.handicap ?? null,
@@ -4035,6 +4067,24 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
 
         <div style={{ padding: "20px 18px 0" }}>
           <div className="field">
+            <label className="field-label">Holes Playing</label>
+            <div className="tee-grid" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+              {[["full18","Full 18"],["front9","Front 9"],["back9","Back 9"]].map(([key,label]) => (
+                <div key={key} className={`tee-pill ${setup.holesFormat===key?"on":""}`} onClick={() => setSetup({ ...setup, holesFormat: key })} style={{ padding: "10px 4px" }}>
+                  <div className="tee-pill-name" style={{ fontSize: 11 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+            {(setup.holesFormat === "front9" || setup.holesFormat === "back9") && (
+              <div style={{ marginTop: 10, padding: "12px 14px", background: "#FFF8E7", border: "1px solid #E08A1E" }}>
+                <p style={{ fontSize: 11.5, color: "#7A4A00", lineHeight: 1.55, margin: 0 }}>
+                  This 9-hole score will be combined with an assumed average score (half your current handicap) for the 9 you didn't play, to work out your handicap. This is a simplified version of the official method — accurate over time, but slightly less precise than pairing two real 9-hole rounds together.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="field">
             <label className="field-label">Round Date</label>
             <input className="input" type="date" value={setup.date} onChange={e => setSetup({ ...setup, date: e.target.value })} />
           </div>
@@ -4079,8 +4129,8 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
   }
 
   // ── Step: Live scorecard ──
-  const front = course.holes.slice(0,9);
-  const back = course.holes.slice(9,18);
+  const front = setup.holesFormat !== "back9" ? activeHoles.slice(0,9) : [];
+  const back = setup.holesFormat === "full18" ? activeHoles.slice(9,18) : (setup.holesFormat === "back9" ? activeHoles : []);
   const HoleRow = ({ h }) => {
     const s = scores[h.n] || {};
     const gross = parseInt(s.strokes);
@@ -4207,10 +4257,18 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
         <p>{teeKey ? `${teeKey.charAt(0).toUpperCase()+teeKey.slice(1)} tees · ` : ""}Par {totalPar}{totalYds ? ` · ${totalYds}y` : ""} · {setup.conditions}</p>
       </div>
 
-      <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">Front Nine</span></div>
-      {front.map(h => <HoleRow key={h.n} h={h} />)}
-      <div className="section-head"><span className="section-title">Back Nine</span></div>
-      {back.map(h => <HoleRow key={h.n} h={h} />)}
+      {front.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">Front Nine</span></div>
+          {front.map(h => <HoleRow key={h.n} h={h} />)}
+        </>
+      )}
+      {back.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: front.length === 0 ? 18 : 0 }}><span className="section-title">Back Nine</span></div>
+          {back.map(h => <HoleRow key={h.n} h={h} />)}
+        </>
+      )}
 
       {/* Safety net — if somehow we got here with no holes, show an escape */}
       {front.length === 0 && back.length === 0 && (
@@ -4269,14 +4327,18 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
                 <LiveRoundSummaryStrip totalPar={totalPar} totalGross={totalGross} totalPts={totalPts} handicap={user.handicap} differential={liveDifferential} />
               </div>
 
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
-                <LiveHoleGrid holes={course.holes.slice(0, 9)} scores={scores} handicap={user.handicap} />
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
-                <LiveHoleGrid holes={course.holes.slice(9, 18)} scores={scores} handicap={user.handicap} />
-              </div>
+              {front.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{setup.holesFormat === "full18" ? "Front Nine" : "Holes 1-9"}</div>
+                  <LiveHoleGrid holes={front} scores={scores} handicap={user.handicap} />
+                </div>
+              )}
+              {back.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{setup.holesFormat === "full18" ? "Back Nine" : "Holes 10-18"}</div>
+                  <LiveHoleGrid holes={back} scores={scores} handicap={user.handicap} />
+                </div>
+              )}
 
               <div style={{ padding: "0 16px" }}>
                 <button className="btn btn-primary" onClick={() => setShowLiveScorecard(false)}>Back to Scoring</button>
@@ -4296,20 +4358,24 @@ function PlayRoundFlow({ user, onUpdateUser, onBack }) {
             <div style={{ padding: "0 16px 10px" }}>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{course.name}</div>
               <div style={{ fontSize: 11, color: C.steel }}>
-                {new Date(setup.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · {holesPlayed}/18 holes
+                {new Date(setup.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · {holesPlayed}/{activeHoles.length} holes
               </div>
             </div>
             <div style={{ margin: "0 16px 18px" }}>
               <LiveRoundSummaryStrip totalPar={totalPar} totalGross={totalGross} totalPts={totalPts} handicap={user.handicap} differential={liveDifferential} />
             </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
-              <LiveHoleGrid holes={course.holes.slice(0, 9)} scores={scores} handicap={user.handicap} />
-            </div>
-            <div style={{ marginBottom: 0 }}>
-              <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
-              <LiveHoleGrid holes={course.holes.slice(9, 18)} scores={scores} handicap={user.handicap} />
-            </div>
+            {front.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{setup.holesFormat === "full18" ? "Front Nine" : "Holes 1-9"}</div>
+                <LiveHoleGrid holes={front} scores={scores} handicap={user.handicap} />
+              </div>
+            )}
+            {back.length > 0 && (
+              <div style={{ marginBottom: 0 }}>
+                <div style={{ padding: "4px 16px 4px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{setup.holesFormat === "full18" ? "Back Nine" : "Holes 10-18"}</div>
+                <LiveHoleGrid holes={back} scores={scores} handicap={user.handicap} />
+              </div>
+            )}
           </div>
         );
       })()}
@@ -4454,6 +4520,7 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
   const [scores, setScores] = useState(round.scores);
   const [dirty, setDirty] = useState(false);
   const [editedCourseName, setEditedCourseName] = useState(round.courseName || course?.name || "");
+  const [holesFormat, setHolesFormat] = useState(round.holesFormat || "full18");
   if (!course) {
     return (
       <div style={{ background: C.paper, minHeight: "100vh" }}>
@@ -4480,15 +4547,18 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
     setDirty(true);
   };
 
-  const totalGross = course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0);
-  const totalPts = course.holes.reduce((s,h)=>{
+  const activeHoles = holesFormat === "front9" ? course.holes.slice(0, 9)
+    : holesFormat === "back9" ? course.holes.slice(9, 18)
+    : course.holes;
+  const totalGross = activeHoles.reduce((s,h)=>s+(parseInt(scores[h.n]?.strokes)||0),0);
+  const totalPts = activeHoles.reduce((s,h)=>{
     const st = parseInt(scores[h.n]?.strokes);
     const effectiveSi = scores[h.n]?.si ?? h.si;
     const p = st ? stablefordPts(st, h.par, user.handicap || 0, effectiveSi) : 0;
     return s + (p||0);
   },0);
-  const totalPutts = course.holes.reduce((s,h)=>s+(parseInt(scores[h.n]?.putts)||0),0);
-  const holesPlayed = course.holes.filter(h => scores[h.n]?.strokes).length;
+  const totalPutts = activeHoles.reduce((s,h)=>s+(parseInt(scores[h.n]?.putts)||0),0);
+  const holesPlayed = activeHoles.filter(h => scores[h.n]?.strokes).length;
 
   // Front/back nine splits
   const nineSplit = (holesSubset) => {
@@ -4502,12 +4572,16 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
     },0);
     return { played, gross, pts };
   };
-  const outNine = nineSplit(course.holes.slice(0,9));
-  const inNine  = nineSplit(course.holes.slice(9,18));
+  const outNine = holesFormat !== "back9" ? nineSplit(activeHoles.slice(0,9)) : { played:0, gross:0, pts:0 };
+  const inNine  = holesFormat === "full18" ? nineSplit(activeHoles.slice(9,18)) : (holesFormat === "back9" ? nineSplit(activeHoles) : { played:0, gross:0, pts:0 });
 
   const saveChanges = () => {
-    const diff = teeInfo ? scoreDifferential(totalGross, teeInfo.rating, teeInfo.slope) : null;
-    const updated = { ...round, courseName: editedCourseName.trim() || round.courseName, scores, totalGross, totalPts, totalPutts, holesPlayed, differential: diff, editedAt: Date.now() };
+    const diff = teeInfo
+      ? (holesFormat === "full18"
+          ? scoreDifferential(totalGross, teeInfo.rating, teeInfo.slope)
+          : nineHoleSyntheticDifferential(totalGross, teeInfo.rating, teeInfo.slope, user.handicap))
+      : null;
+    const updated = { ...round, courseName: editedCourseName.trim() || round.courseName, holesFormat, scores, totalGross, totalPts, totalPutts, holesPlayed, differential: diff, editedAt: Date.now() };
     const rounds = LS.get(`bb_rounds_${user.id}`) || [];
     const next = rounds.map(r => r.id === round.id ? updated : r);
     LS.set(`bb_rounds_${user.id}`, next);
@@ -4527,8 +4601,8 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
     onSave(updated);
   };
 
-  const front = course.holes.slice(0,9);
-  const back = course.holes.slice(9,18);
+  const front = holesFormat !== "back9" ? activeHoles.slice(0,9) : [];
+  const back = holesFormat === "full18" ? activeHoles.slice(9,18) : (holesFormat === "back9" ? activeHoles : []);
   const HoleRow = ({ h }) => {
     const s = scores[h.n] || {};
     const gross = parseInt(s.strokes);
@@ -4649,14 +4723,36 @@ function RoundReviewFlow({ user, round, onUpdateUser, onSave, onBack }) {
           </div>
         </div>
         <p style={{ marginTop: 4 }}>{new Date(round.date).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</p>
+
+        <div style={{ marginTop: 14, position: "relative", zIndex: 1 }}>
+          <label className="field-label">Holes Played</label>
+          <p style={{ fontSize: 10.5, color: C.steel, marginTop: -2, marginBottom: 8, lineHeight: 1.5 }}>
+            Useful if this was set up as a full 18 but you only got through 9 — fixes par, totals and your handicap figure to match what was actually played.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["full18","Full 18"],["front9","Front 9"],["back9","Back 9"]].map(([key,label]) => (
+              <button key={key} onClick={() => { setHolesFormat(key); setDirty(true); }} style={{ flex: 1, padding: "10px 0", fontWeight: 800, fontSize: 12.5, border: `1.5px solid ${holesFormat === key ? C.black : C.line}`, background: holesFormat === key ? C.black : C.white, color: holesFormat === key ? C.white : C.black, cursor: "pointer" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <div className="panel" style={{ marginTop: -1 }}>
-        <RoundSummaryStrip round={{ ...round, totalGross, totalPts, coursePar: course.holes.reduce((s,h)=>s+h.par,0) }} user={user} />
+        <RoundSummaryStrip round={{ ...round, totalGross, totalPts, coursePar: activeHoles.reduce((s,h)=>s+h.par,0) }} user={user} />
       </div>
-      <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">Front Nine</span></div>
-      {front.map(h => <HoleRow key={h.n} h={h} />)}
-      <div className="section-head"><span className="section-title">Back Nine</span></div>
-      {back.map(h => <HoleRow key={h.n} h={h} />)}
+      {front.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: 18 }}><span className="section-title">{holesFormat === "full18" ? "Front Nine" : "Holes 1-9"}</span></div>
+          {front.map(h => <HoleRow key={h.n} h={h} />)}
+        </>
+      )}
+      {back.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: front.length === 0 ? 18 : 0 }}><span className="section-title">{holesFormat === "full18" ? "Back Nine" : "Holes 10-18"}</span></div>
+          {back.map(h => <HoleRow key={h.n} h={h} />)}
+        </>
+      )}
       <div style={{ padding: "8px 18px 24px" }}>
         <button className="btn btn-primary" onClick={saveChanges} style={{ opacity: dirty?1:0.5 }} disabled={!dirty}>
           Save Changes
@@ -5651,6 +5747,7 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
   // Defaults to entry order, but this is what lets someone actually choose
   // rather than it being silently assumed.
   const [pairs, setPairs] = useState([[0, 1], [2, 3]]);
+  const [holesFormat, setHolesFormat] = useState("full18");
 
   const setPairSlot = (pairIdx, slotIdx, playerIdx) => {
     setPairs(prev => {
@@ -5698,6 +5795,7 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
       format,
       ballCount,
       matchType: (format === "matchplay" && ballCount === 4) ? matchType : undefined,
+      holesFormat,
       players: orderedPlayers.map((p, i) => ({ ...p, id: i + 1, handicap: parseFloat(p.handicap) || 0 })),
       sideGames: { nearestPin: false, nearestIn2: false, longestDrive: false },
     });
@@ -5720,6 +5818,18 @@ function CompSetupFlow({ onBack, onNext, courseName }) {
         <div className="field" style={{ marginBottom: 20 }}>
           <label className="field-label">Game Name</label>
           <input className="input" placeholder="e.g. Saturday Medal, Walsall Trip" value={gameName} onChange={e => setGameName(e.target.value)} />
+        </div>
+
+        {/* Holes format */}
+        <div className="field" style={{ marginBottom: 20 }}>
+          <label className="field-label">Holes Playing</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["full18","Full 18"],["front9","Front 9"],["back9","Back 9"]].map(([key,label]) => (
+              <button key={key} onClick={() => setHolesFormat(key)} style={{ flex: 1, padding: "12px 0", fontWeight: 800, fontSize: 13, border: `1.5px solid ${holesFormat === key ? C.black : C.line}`, background: holesFormat === key ? C.black : C.white, color: holesFormat === key ? C.white : C.black, cursor: "pointer" }}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Number of players */}
@@ -6096,7 +6206,7 @@ function ShareableLeaderboardCard({ comp, holes, scores, matchResults, playerPts
 }
 
 function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
-  const [currentHole, setCurrentHole] = useState(1);
+  const [currentHole, setCurrentHole] = useState(comp.holesFormat === "back9" ? 10 : 1);
   const [scores, setScores] = useState(comp.scores || {});
   const [sideGameWinners, setSideGameWinners] = useState(comp.sideGameWinners || {});
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -6150,7 +6260,10 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
   const [showSideGame, setShowSideGame] = useState(null);
 
   const course = comp.course;
-  const holes = course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}}));
+  const allHoles = course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}}));
+  const holes = comp.holesFormat === "front9" ? allHoles.slice(0, 9)
+    : comp.holesFormat === "back9" ? allHoles.slice(9, 18)
+    : allHoles;
   const hole = holes.find(h => h.n === currentHole) || holes[0];
 
   const updateScore = (playerId, field, val) => {
@@ -6734,9 +6847,11 @@ function CompScoringFlow({ comp, onUpdate, onFinish, onBack }) {
 // ─── Competition Detail View ───────────────────────────────────────────────────
 function CompDetailView({ comp, onBack, onResume }) {
   const course = comp.course;
-  const holes = course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}}));
-  const front = holes.slice(0, 9);
-  const back = holes.slice(9, 18);
+  const holes = comp.holesFormat === "front9" ? (course?.holes || []).slice(0, 9)
+    : comp.holesFormat === "back9" ? (course?.holes || []).slice(9, 18)
+    : (course?.holes || Array.from({length:18},(_,i)=>({n:i+1,par:4,si:i+1,yds:{}})));
+  const front = comp.holesFormat !== "back9" ? holes.slice(0, 9) : [];
+  const back = comp.holesFormat === "full18" ? holes.slice(9, 18) : (comp.holesFormat === "back9" ? holes : []);
   const scores = comp.scores || {};
 
   const playerPts = (player, h) => {
@@ -6951,14 +7066,22 @@ function CompDetailView({ comp, onBack, onResume }) {
       })()}
 
       {/* Scorecard grids */}
-      <div style={{ margin: "0 18px 6px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Front Nine</div>
-      <div style={{ margin: "0 18px 14px", border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <HoleGrid holeSet={front} label="Player" />
-      </div>
-      <div style={{ margin: "0 18px 6px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>Back Nine</div>
-      <div style={{ margin: "0 18px 18px", border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <HoleGrid holeSet={back} label="Player" />
-      </div>
+      {front.length > 0 && (
+        <>
+          <div style={{ margin: "0 18px 6px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{comp.holesFormat === "full18" || !comp.holesFormat ? "Front Nine" : "Holes 1-9"}</div>
+          <div style={{ margin: "0 18px 14px", border: `1px solid ${C.line}`, overflow: "hidden" }}>
+            <HoleGrid holeSet={front} label="Player" />
+          </div>
+        </>
+      )}
+      {back.length > 0 && (
+        <>
+          <div style={{ margin: "0 18px 6px", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: C.steel }}>{comp.holesFormat === "full18" || !comp.holesFormat ? "Back Nine" : "Holes 10-18"}</div>
+          <div style={{ margin: "0 18px 18px", border: `1px solid ${C.line}`, overflow: "hidden" }}>
+            <HoleGrid holeSet={back} label="Player" />
+          </div>
+        </>
+      )}
 
       {/* Round summary — total strokes and points per player across all 18 */}
       <div style={{ margin: "0 18px 18px" }}>
