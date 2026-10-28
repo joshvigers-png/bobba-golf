@@ -1206,6 +1206,8 @@ function ResetPasswordScreen({ onBack }) {
 
 function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChange }) {
   const [mode, setMode] = useState("login");
+  const [agreedTerms, setAgreedTerms] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", username: "", password: "", dob: "", handicap: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1343,6 +1345,7 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
     const password = form.password;
     try {
       if (mode === "signup") {
+        if (!agreedTerms) { setError("Please agree to the Terms & Conditions and Privacy Policy to create an account."); return; }
         // Age check — must be 16 or older
         if (!form.dob) { setError("Please enter your date of birth."); return; }
         const dob = new Date(form.dob);
@@ -1397,6 +1400,8 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
           friends: [],
           friendRequests: [],
           sentRequests: [],
+          termsAcceptedAt: Date.now(),
+          termsVersion: LEGAL.termsVersion,
           joined: Date.now(),
         };
 
@@ -1653,11 +1658,15 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
           </div>
         )}
 
+        {mode === "signup" && (
+          <TermsAgreement checked={agreedTerms} onChange={setAgreedTerms} onOpenDoc={setLegalDoc} />
+        )}
+
         <button
           className="btn btn-primary"
           onClick={submit}
-          disabled={loading || (mode === "signup" && verifyStage !== "verified")}
-          style={{ opacity: (loading || (mode === "signup" && verifyStage !== "verified")) ? 0.4 : 1 }}
+          disabled={loading || (mode === "signup" && (verifyStage !== "verified" || !agreedTerms))}
+          style={{ opacity: (loading || (mode === "signup" && (verifyStage !== "verified" || !agreedTerms))) ? 0.4 : 1 }}
         >
           {loading ? (mode === "signup" ? "Creating account…" : "Signing in…") : (mode === "signup" ? "Create Account" : "Sign In")}
         </button>
@@ -1673,6 +1682,7 @@ function AuthScreen({ onAuth, onShowReset, onNeedsVerification, onSignupFlowChan
       <p style={{ color: C.ash, fontSize: 10, marginTop: 30, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 600, position: "relative", zIndex: 1, animation: "fadeUp .6s cubic-bezier(.16,1,.3,1) .4s both", opacity: 0 }}>
         Est. for the modern golfer
       </p>
+      {legalDoc && <LegalDocSheet docId={legalDoc} onClose={() => setLegalDoc(null)} />}
     </div>
   );
 }
@@ -1734,6 +1744,8 @@ function EmailVerificationGateScreen({ email, onResend, onCheckAgain, onSignOut 
 // rather than leaving them with a verified account they can never use.
 function FinishProfileScreen({ firebaseUser, onSaved }) {
   const [form, setForm] = useState({ name: "", username: "", dob: "", handicap: "" });
+  const [agreedTerms, setAgreedTerms] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null);
   const [usernameStatus, setUsernameStatus] = useState(null);
   const [usernameError, setUsernameError] = useState("");
   const [error, setError] = useState("");
@@ -1757,6 +1769,7 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
 
   const submit = async () => {
     setError("");
+    if (!agreedTerms) { setError("Please agree to the Terms & Conditions and Privacy Policy to continue."); return; }
     if (!form.dob) { setError("Please enter your date of birth."); return; }
     const dob = new Date(form.dob);
     const today = new Date();
@@ -1799,6 +1812,8 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
       friends: [],
       friendRequests: [],
       sentRequests: [],
+      termsAcceptedAt: Date.now(),
+      termsVersion: LEGAL.termsVersion,
       joined: Date.now(),
     };
     let saved = false;
@@ -1861,11 +1876,13 @@ function FinishProfileScreen({ firebaseUser, onSaved }) {
           <label className="field-label">Date of Birth</label>
           <input className="input" type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
         </div>
+        <TermsAgreement checked={agreedTerms} onChange={setAgreedTerms} onOpenDoc={setLegalDoc} />
         {error && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>}
-        <button className="btn btn-primary" onClick={submit} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
+        <button className="btn btn-primary" onClick={submit} disabled={loading || !agreedTerms} style={{ opacity: (loading || !agreedTerms) ? 0.5 : 1 }}>
           {loading ? "Saving…" : "Finish Setup"}
         </button>
       </div>
+      {legalDoc && <LegalDocSheet docId={legalDoc} onClose={() => setLegalDoc(null)} />}
     </div>
   );
 }
@@ -1989,18 +2006,28 @@ export default function App() {
       return { ok: false, error: "Couldn't verify your password. Please try again." };
     }
 
-    // Delete the Firebase Auth account first — if this fails, nothing else
-    // has been touched, so the account and its data are still safe.
-    try {
-      await deleteUser(firebaseUser);
-    } catch (e) {
-      return { ok: false, error: "Account deletion failed. Please try again." };
-    }
+    // Order matters. Everything that touches Firestore has to happen while the
+    // person is still signed in, because the database rules only let a
+    // signed-in user change their own data. So: tidy other members' friend
+    // lists, delete this person's data, and only then delete the sign-in
+    // itself. (Doing it the other way round meant the data deletes ran with
+    // no sign-in at all, and could be refused.)
+    const others = [...new Set([...(user.friends || []), ...(user.friendRequests || []), ...(user.sentRequests || [])])];
+    await Promise.all(others.map(async (otherId) => {
+      try {
+        const other = await DB.getUserById(otherId);
+        if (!other) return;
+        const without = (list) => (list || []).filter(id => id !== uid);
+        await DB.setUser(otherId, {
+          friends: without(other.friends),
+          friendRequests: without(other.friendRequests),
+          sentRequests: without(other.sentRequests),
+        });
+      } catch (err) {
+        console.error("[Delete account] couldn't tidy friend lists for", otherId, err);
+      }
+    }));
 
-    // Now delete all Firestore data — profile doc plus every subcollection.
-    // The Auth account is already gone at this point, so even if this part
-    // partially fails, the person can no longer sign back in — we just log
-    // it so orphaned data can be cleaned up manually if it ever happens.
     try {
       const [rounds, goals, comps] = await Promise.all([DB.getRounds(uid), DB.getGoals(uid), DB.getComps(uid)]);
       await Promise.all([
@@ -2012,7 +2039,15 @@ export default function App() {
       ]);
       await DB.deleteUser(uid);
     } catch (err) {
-      console.error("[Delete account] Failed to fully clear Firestore data:", err);
+      console.error("[Delete account] Failed to clear Firestore data:", err);
+      return { ok: false, error: "We couldn't remove all of your data, so nothing has been closed. Please try again." };
+    }
+
+    // The data is gone, so now close the sign-in itself.
+    try {
+      await deleteUser(firebaseUser);
+    } catch (e) {
+      return { ok: false, error: "Your data was removed but we couldn't close your sign-in. Please try again." };
     }
     LS.del(`bb_rounds_${uid}`);
     LS.del(`bb_goals_${uid}`);
@@ -2878,6 +2913,322 @@ function WHSInfoSheet({ onClose }) {
   );
 }
 
+// ─── Legal and help content ──────────────────────────────────────────────────
+// Privacy Policy, Terms & Conditions and Help & Support. Kept as plain data
+// between the LEGAL markers so the wording is easy to find and edit, and so
+// the structure can be checked on its own. If the app starts collecting
+// something new (analytics, push notifications, payments), update the
+// matching sections here and bump the dates.
+// LEGAL-CONTENT-START
+const LEGAL = {
+  email: "Bobbagolf@gmail.com",
+  updated: "28 October 2026",
+  termsVersion: "2026-10-28",
+};
+
+const LEGAL_DOCS = {
+  privacy: {
+    title: "Privacy Policy",
+    intro: "This explains what Bobba Golf collects about you, why, who it's shared with, and the choices you have. 'We' and 'us' mean Bobba Golf, who are responsible for your personal data.",
+    sections: [
+      { h: "What we collect", body: [
+        "Account details: your name, email address and username, and a password. Your password is handled by our sign-in provider and we can't see it. We check your date of birth once to confirm you're 16 or over, and we don't store it.",
+        [
+          "Your golf data: rounds and scores, courses and tees, dates and conditions, your handicap index and its history, goals, your bag, and any unfinished round or game.",
+          "Other players' details that you enter: the names and handicaps of people you add to a Play with Friends game. They may not use the app, so please only add people who are happy to be included.",
+          "Your profile photo, if you add one.",
+          "Your friends: your friends list and the requests you send and receive.",
+          "A record of when you agreed to our Terms, and which version.",
+          "Technical data: when the app connects, our hosting and service providers receive things like your IP address and browser or device type. The app also keeps a copy of your data and your sign-in on your device so it loads quickly and keeps you signed in.",
+        ],
+      ]},
+      { h: "How we use it", body: [
+        [
+          "To run the app for you (because you've asked us to): create your account, save your scores, work out your handicap, run games and show you to your friends.",
+          "To keep the app safe and working (our legitimate interests): stop abuse and duplicate usernames, fix problems and keep things secure.",
+          "To meet legal duties where they apply.",
+          "With your consent where we ask for it, for example a profile photo. You can withdraw consent at any time.",
+        ],
+        "We don't sell your data and we don't show adverts. We don't currently use analytics or advertising trackers. If that changes we'll update this policy first.",
+      ]},
+      { h: "Who can see your information", body: [
+        [
+          "Other Bobba Golf users: your name, username, profile photo and handicap index, plus a simple label worked out from it such as Competitive or Amateur. That's all. Your rounds, scores, goals, games, bag and handicap history are not shown to other users. People can find you by searching for your username or your email address.",
+          "Anyone you share with: if you share a leaderboard or scorecard image, it goes wherever you send it. We can't see or control that.",
+          "Usernames aren't secret. A register of usernames lets the sign-up screen check whether a name is taken.",
+        ],
+      ]},
+      { h: "Services we use to run the app", body: [
+        [
+          "Google Firebase (sign-in and database): stores your account and data, and sends verification and password-reset emails.",
+          "Vercel: hosts the app's web files.",
+          "Cloudflare: runs a secure relay between the app and the two services below.",
+          "GolfCourseAPI: when you search for a course, your search words are sent to it so it can return results. We don't send your name or account details.",
+          "Anthropic (AI): when you scan a scorecard, the photo is sent through our relay to Anthropic's AI service to read the hole details. We don't save the photo to your account. Everything on the card is sent, so please don't include anything personal.",
+          "Google Fonts: the app loads its font from Google, which receives your IP address when it does.",
+          "Instagram and TikTok: links in The Lounge open those sites, which have their own privacy policies.",
+          "Apple and Google: if you buy paid features through the App Store or Google Play, they take the payment and see your purchase details. We never see your card details.",
+        ],
+        "These companies handle data for us under their own terms and security measures. Some are based in, or process data in, the United States and elsewhere. Where data leaves the UK we rely on safeguards the law allows, such as approved contract terms or the UK-US data bridge.",
+      ]},
+      { h: "How long we keep it", body: [
+        "We keep your data while your account is open. If you delete your account (Profile, then Delete Account), we delete your profile, rounds, goals, games, bag, unfinished rounds, username and sign-in, and remove you from other members' friends lists. This is permanent. Copies may stay in our providers' backups for a short while before they're overwritten.",
+        "A game you were added to as a playing partner belongs to the person who created it and keeps the name they typed in. If you buy anything, we may keep limited purchase records where the law requires.",
+      ]},
+      { h: "Your rights", body: [
+        "You can ask to see the data we hold about you, correct it (most of it you can edit in Profile), delete it (Delete Account), limit or object to how we use it, take a copy of it, or withdraw consent. Email us and we'll reply within one month.",
+        `If you're unhappy with how we've handled your data, you can complain to the Information Commissioner's Office at ico.org.uk or on 0303 123 1113. We'd appreciate the chance to put it right first: ${LEGAL.email}.`,
+      ]},
+      { h: "Age", body: [
+        "Bobba Golf is for people aged 16 and over. If we find out that someone younger has an account, we'll delete it.",
+      ]},
+      { h: "Security", body: [
+        "Your data travels over encrypted connections, and access to the database is protected by sign-in and security rules. No system is completely secure, so please use a strong password that you don't use anywhere else. If a breach puts you at risk, we'll tell you and the ICO as the law requires.",
+      ]},
+      { h: "Changes to this policy", body: [
+        `If we change this policy in a way that matters, we'll tell you in the app. The date at the top shows the latest version. Questions: ${LEGAL.email}.`,
+      ]},
+    ],
+  },
+
+  terms: {
+    title: "Terms & Conditions",
+    intro: "These terms are the agreement between you and Bobba Golf for using the Bobba Golf app. Please read them. Sections 4 (handicaps), 9 (paid features) and 13 (our responsibility) matter most. By creating an account or using the app, you agree to them.",
+    sections: [
+      { h: "1. About these terms", body: [
+        `'We', 'us' and 'Bobba Golf' mean the business that runs the Bobba Golf app. You can contact us at ${LEGAL.email}. You must be 16 or over to use the app. If you don't agree to these terms, please don't use it.`,
+      ]},
+      { h: "2. Your account", body: [
+        [
+          "Give us accurate details and keep them up to date.",
+          "Keep your password secret. You're responsible for everything done through your account, so tell us straight away if you think someone else has got in.",
+          "One account per person. Usernames can't impersonate other people or Bobba Golf, and we may block or change a name that breaks these terms.",
+        ],
+        "You can delete your account at any time from Profile.",
+      ]},
+      { h: "3. What the app does", body: [
+        "Bobba Golf lets you record rounds and scores, track a handicap estimate, play scored games with friends, connect with other golfers and follow practice routines. The app is still being developed and is in beta, so features may change, move or be removed, and it may sometimes be unavailable. We'll provide it with reasonable care and skill, but we can't promise it will always run without interruption or errors.",
+      ]},
+      { h: "4. Handicaps, scores and course information", body: [
+        [
+          "The Handicap Index in the app is an estimate worked out from the scores you enter, using principles of the World Handicap System. It is not an official handicap. We aren't affiliated with or endorsed by the R&A, the USGA, England Golf, or any golf union, county or club.",
+          "For 9-hole rounds we use a simplified method that combines your score with an assumed score for the other nine. This can differ from the official method.",
+          "Don't rely on these figures for competitions, bets, club entries or anything else that needs an official handicap. Ask your club or golf union for that.",
+          "Course details such as par, stroke index, yardages, course rating and slope come from third-party sources or from scorecards you scan. They can be wrong or out of date, and AI scorecard scanning can misread a card. Please check anything the app reads before you rely on it.",
+          "You're responsible for the scores you enter. We aren't responsible for decisions, disputes or results that depend on the figures the app shows.",
+        ],
+      ]},
+      { h: "5. Practice routines and your health", body: [
+        "The On The Range routines, goals and tips are general ideas for improving your game. They aren't professional coaching, or medical or fitness advice. Golf and practice involve physical activity and a risk of injury. If you have a health concern, ask a doctor first. Warm up, stop if anything hurts, check that people are clear before you swing, and follow the rules and safety instructions at any range or course. You use the routines at your own risk, but nothing in these terms limits our liability for death or personal injury caused by our negligence.",
+      ]},
+      { h: "6. Your content", body: [
+        "'Your content' means what you put into the app, such as scores, names, handicaps, game details, your profile photo and your username. You keep ownership of it. You give us a limited licence to store, process and show it as needed to run the app for you, including showing it to friends and other users in the ways the app is designed to. That ends when you delete the content or your account, unless we must keep a copy by law.",
+        "You promise that your content is yours to use, and that you have permission to enter other people's names and details, for example playing partners in a game. Only add people who are happy to be included.",
+      ]},
+      { h: "7. Acceptable use", body: [
+        "Please don't:",
+        [
+          "break the law or anyone's rights;",
+          "harass, abuse, threaten or impersonate anyone, or use offensive usernames, names or photos;",
+          "send spam, or unwanted friend requests in bulk;",
+          "upload anything harmful, or use the scorecard scanner for anything other than scorecards;",
+          "try to get into other people's accounts or data, or get around our security;",
+          "copy, scrape, reverse-engineer or overload the app, or use bots or automated tools;",
+          "make new accounts to dodge a suspension or to abuse free features or limits;",
+          "use the app for business purposes without our written permission.",
+        ],
+        "We can remove content and suspend or close accounts that break these rules.",
+      ]},
+      { h: "8. Friends and other users", body: [
+        `Other users are responsible for what they post and share. We don't check it and aren't responsible for it. If something concerns you, email ${LEGAL.email}. Other users can see your name, username, profile photo and handicap, and nothing else from your account. Other signed-in users can find you by searching for your username or email address.`,
+      ]},
+      { h: "9. Free features, Pro and subscriptions", body: [
+        "Some features are free. We may offer a paid 'Pro' tier or other paid features, now or in future. The features, price and billing period will be shown to you before you buy.",
+        [
+          "Payment: purchases are made through the Apple App Store or Google Play, and the payment is taken by them. Their terms and refund rules apply to the purchase. Prices include VAT where it applies.",
+          "Renewal: subscriptions renew automatically for the same period unless you cancel before the end of the current period (at least 24 hours before, on the App Store). You can manage or cancel a subscription in your App Store or Google Play account settings. Deleting the app or your Bobba Golf account does not cancel a subscription.",
+          "Free trials: if we offer one, it becomes a paid subscription when it ends unless you cancel before then.",
+          "Refunds: Apple and Google deal with refund requests for store purchases under their own policies, and we can't refund them ourselves. This doesn't affect your legal rights as a consumer.",
+          "Changing your mind: where consumer law gives you 14 days to cancel a digital purchase, you can lose that right once we start providing it with your agreement. The store will ask for that agreement when you buy.",
+          "Price changes: we may change prices. We'll give you the notice the stores require, the new price applies from your next renewal, and you can cancel before then.",
+          "Changes to paid features: we may add, change or remove features. If a change clearly reduces what you've already paid for, you can cancel and ask us for a fair refund for the unused time.",
+          "Your Pro access is linked to your Bobba Golf account and your store account. It can't be transferred or shared, and you can restore it on another device by signing in and using the restore option where it's available.",
+        ],
+      ]},
+      { h: "10. Ownership of the app", body: [
+        "We own, or have the right to use, the app, the Bobba Golf name and logo, and the design, text and code. We give you a personal, non-exclusive, non-transferable licence to use the app for your own non-business use for as long as these terms allow. Don't copy, modify, sell, rent or share the app, or try to get at its source code, except where the law allows. Course details, logos and marks belong to their owners.",
+      ]},
+      { h: "11. Third-party services", body: [
+        "The app relies on services from other companies, such as Google Firebase, Vercel, Cloudflare, GolfCourseAPI and an AI provider for scorecard scanning, and it links to sites such as Instagram and TikTok. They have their own terms. We aren't responsible for them, and they may change or stop working. Our Privacy Policy explains what data goes to them.",
+      ]},
+      { h: "12. Suspension and ending your account", body: [
+        "You can stop using the app and delete your account at any time from Profile. Deleting your account permanently removes your data and we can't restore it.",
+        "We can suspend or close your account if you seriously or repeatedly break these terms, if we need to for legal or security reasons, or if we stop running the app. Where it's reasonable we'll tell you first and give you the chance to put things right. If we end the service, we'll give you reasonable notice and refund any paid period you haven't used.",
+      ]},
+      { h: "13. Our responsibility to you", body: [
+        "Nothing in these terms limits or excludes our liability for death or personal injury caused by our negligence, for fraud or fraudulent misrepresentation, or for anything else the law doesn't allow us to limit. Your legal rights as a consumer, such as getting digital content that is as described, of satisfactory quality and fit for purpose, are not affected.",
+        "Subject to that:",
+        [
+          "we're not liable for losses we couldn't reasonably have foreseen, or for lost profits, business or opportunity. The app is for personal use only;",
+          "we're not liable for losses caused by things outside our reasonable control, including problems with your device, your network, the app stores or third-party services;",
+          "we're not liable for decisions, disputes, bets or competition results that rely on handicaps, scores, course details or practice advice from the app;",
+          "we're not responsible for other users' content or behaviour;",
+          "our total liability to you for anything connected with the app is limited to the greater of £100 and what you paid us in the 12 months before the claim.",
+        ],
+      ]},
+      { h: "14. Changes to the app and these terms", body: [
+        "We may update the app and these terms, for example to add features, reflect changes in the law or improve security. If a change matters, we'll tell you in the app or by email before it takes effect, unless we need to act sooner for legal reasons. If you keep using the app after a change, you agree to the new terms. If you don't agree, you can delete your account. The date at the top shows the current version.",
+      ]},
+      { h: "15. App Store and Google Play", body: [
+        "If you got the app from Apple's App Store, Apple's standard Licensed Application End User Licence Agreement also applies between you and Apple. Apple and Google aren't parties to these terms, aren't responsible for the app, its content, support or maintenance, and aren't responsible for dealing with claims about it. Apple and its subsidiaries are third-party beneficiaries of the Apple agreement. If these terms and Apple's agreement conflict on the app licence, Apple's agreement applies on that point.",
+      ]},
+      { h: "16. Law and disputes", body: [
+        "These terms are governed by the law of England and Wales. If you have a complaint, please email us first and we'll try to put it right. Disputes can be brought in the courts of England and Wales. If you live in Scotland or Northern Ireland you can also use your local courts. If you live outside the UK you keep any mandatory rights you have under your own country's law.",
+      ]},
+      { h: "17. General", body: [
+        "These terms and our Privacy Policy are the whole agreement between us about the app. If part of them can't be enforced, the rest still applies. If we don't enforce a right straight away, we can still do so later. You can't transfer your rights under these terms, but we may transfer ours to a successor of the business. Nobody other than you and us (and Apple, as set out in section 15) can enforce these terms. We aren't responsible for delays or failures caused by events outside our reasonable control.",
+      ]},
+      { h: "18. Contact", body: [
+        `Questions, complaints or notices: ${LEGAL.email}.`,
+      ]},
+    ],
+  },
+};
+
+const HELP_SECTIONS = [
+  { h: "Getting started", items: [
+    { q: "I didn't get my verification email", a: "Check your spam or junk folder, and make sure the address is spelled correctly. On the sign-up screen, tap Resend (there's a short wait between sends). You need to tap the link in the email before Create Account unlocks." },
+    { q: "I forgot my password", a: "On the sign-in screen, tap Forgot password and enter your email. We'll send you a link to set a new one." },
+    { q: "What are the username rules?", a: "5 to 20 characters, starting with a letter, using only letters, numbers and underscores. Every username is unique. You can change yours in Profile, then Edit." },
+  ]},
+  { h: "Rounds and handicap", items: [
+    { q: "How do I record a round?", a: "Open Play a Round, search for a course (or scan a scorecard), choose your tees, date, conditions and Holes Playing (Full 18, Front 9 or Back 9), then enter scores hole by hole and tap Submit Scorecard. Your round saves as you go, so you can close the app and carry on later." },
+    { q: "What is the Live Scorecard?", a: "The Live Scorecard button at the top of Play a Round shows your card so far: par, strokes, points, to par and Played To, with every hole colour-coded. Tap the share icon to send it as an image." },
+    { q: "How is my handicap calculated?", a: "Each round gives a score differential using the course rating and slope. Your index is built from your best differentials across your last 20 rounds, following World Handicap System principles, and updates each time you submit a scorecard. It's an estimate, not an official handicap. Tap the (i) on the Performance handicap graph for the full explanation." },
+    { q: "How do 9-hole rounds count?", a: "A 9-hole round is combined with an assumed score for the other nine (half your current index) to make an 18-hole equivalent. It's a simplified version of the official method and counts towards your index like any other round." },
+    { q: "I set up 18 holes but only played 9", a: "Open History, tap the pencil on the round, choose Front 9 or Back 9 under Holes Played, then Save Changes. Par, totals and your handicap figure update to match." },
+    { q: "Why is Played To blank?", a: "Played To needs the course rating and slope. Scanning the scorecard captures them, as long as they're printed on it." },
+    { q: "My handicap looks wrong", a: "Go to Profile, then Handicap, then Recalculate Now. It replays your rounds in date order and rebuilds your index and history. It's worth doing after you add old rounds or edit existing ones." },
+    { q: "How do I edit or delete a round?", a: "In History, tap the pencil to edit a round or the red bin to delete it permanently. Your handicap recalculates." },
+    { q: "How do I scan a scorecard?", a: "In Play a Round, tap Scan a Scorecard and photograph your physical card. The AI reads hole numbers, par, stroke index, yardages and ratings. Always check what it read before you confirm, because it can make mistakes." },
+    { q: "What is Stableford?", a: "A points system based on your score against par and your handicap strokes. Net par is 2 points, birdie 3, bogey 1, and double bogey or worse 0." },
+  ]},
+  { h: "Play with Friends", items: [
+    { q: "How do I start a game?", a: "Open Competition Mode (Play with Friends), tap New Game and pick a course. Then name the game, choose Full 18, Front 9 or Back 9, set the number of players, enter their names and handicaps, and choose Stableford, Stroke Play or Match Play." },
+    { q: "How does match play work with four players?", a: "Choose Pairs for 2 v 2, where the best net score in each pair wins the hole for the team. Or choose Singles for two separate 1 v 1 matches in the same group. You choose who is paired or who plays whom." },
+    { q: "How do I share the leaderboard?", a: "Tap Leaderboard during a game, then the share icon. The leaderboard is sent as an image through your phone's share sheet, so you can post it to WhatsApp, Messages and so on. Other people can't watch a game live in the app yet." },
+    { q: "I closed the app in the middle of a game", a: "Open Competition Mode. A Game in progress banner appears at the top. Tap it to carry on with all your scores in place." },
+  ]},
+  { h: "Friends", items: [
+    { q: "How do I add a friend?", a: "Open The Lounge, tap Find Friends, search by username or email address and tap the + button. Your request shows under Pending until they respond, and you can cancel it from there." },
+    { q: "Where are my friend requests?", a: "Requests sent to you show on the bell icon at the top of the Home screen. Open The Lounge from there to accept or decline." },
+    { q: "I can't find someone", a: "Check the spelling of their username, or use their full email address. They need an account that has finished sign-up." },
+    { q: "What can other people see about me?", a: "Your name, username, profile photo and handicap. That's all. Your rounds, scores, goals, games and bag stay private to you." },
+  ]},
+  { h: "Practice, goals and your bag", items: [
+    { q: "What is On The Range?", a: "A practice module for the range. Pick what you want to work on, say how many balls you have, and you get a routine with a warm-up, set-up checkpoints and drills shared out across your balls. Tap each block to tick it off as you go. Routines aren't saved once you leave the screen." },
+    { q: "How do I add clubs to The Bag?", a: "Open The Bag, tap the + button and fill in your club details, including summer and winter yardages. Mark the bag as complete when you're done and it shows as a table." },
+  ]},
+  { h: "Your account and data", items: [
+    { q: "Is my data saved?", a: "Yes. Your rounds, games, goals and bag are saved to your account online as you go, so you can sign in on another device and find them there." },
+    { q: "How do I change my name, username or photo?", a: "Go to Profile. Tap your photo to change it, or tap Edit to change your name, username or handicap index." },
+    { q: "How do I delete my account?", a: "Go to Profile, then Delete Account, and follow the steps. You'll need your password. Everything is permanently deleted and can't be restored. If you ever buy a subscription, cancel it in your App Store or Google Play settings too, because deleting your account doesn't cancel it." },
+    { q: "How do I report a problem with a user?", a: `Email ${LEGAL.email} with their username and what happened.` },
+  ]},
+];
+// LEGAL-CONTENT-END
+
+// Shows the Privacy Policy or the Terms & Conditions in a scrollable sheet.
+// Used from Profile, and from the sign-up screens where people agree to them.
+function LegalDocSheet({ docId, onClose }) {
+  const doc = LEGAL_DOCS[docId];
+  if (!doc) return null;
+  return (
+    <div className="sheet-overlay" onClick={onClose}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{doc.title}</div>
+            <div style={{ fontSize: 11, color: C.ash, marginTop: 2 }}>Last updated {LEGAL.updated}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ width: 30, height: 30, border: "none", background: C.cloud, borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 14, height: 14, color: C.black }}><Icon.X /></div>
+          </button>
+        </div>
+        <p style={{ fontSize: 12.5, color: C.black, lineHeight: 1.6, margin: "0 0 16px" }}>{doc.intro}</p>
+        {doc.sections.map(sec => (
+          <div key={sec.h} style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{sec.h}</div>
+            {sec.body.map((part, i) => Array.isArray(part) ? (
+              <ul key={i} style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+                {part.map((li, j) => (
+                  <li key={j} style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, marginBottom: 4 }}>{li}</li>
+                ))}
+              </ul>
+            ) : (
+              <p key={i} style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: "0 0 8px" }}>{part}</p>
+            ))}
+          </div>
+        ))}
+        <button className="btn btn-primary" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+function HelpSheet({ onClose }) {
+  return (
+    <div className="sheet-overlay" onClick={onClose}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>Help & Support</div>
+          <button onClick={onClose} aria-label="Close" style={{ width: 30, height: 30, border: "none", background: C.cloud, borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 14, height: 14, color: C.black }}><Icon.X /></div>
+          </button>
+        </div>
+        {HELP_SECTIONS.map(sec => (
+          <div key={sec.h} style={{ marginBottom: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: 11.5, color: C.black, margin: "14px 0 8px" }}>{sec.h}</div>
+            {sec.items.map(({ q, a }) => (
+              <div key={q} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${C.line}` }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{q}</div>
+                <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>{a}</p>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={{ background: C.cloud, padding: "14px 16px", margin: "8px 0 18px" }}>
+          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Found a bug or have a suggestion?</div>
+          <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>
+            Email us at <span style={{ fontWeight: 700, color: C.black }}>{LEGAL.email}</span>. A screenshot and the type of phone you're using help a lot.
+          </p>
+        </div>
+        <div style={{ fontSize: 10, color: C.ash, textAlign: "center", marginBottom: 16 }}>Bobba Golf · Beta v1.0</div>
+        <button className="btn btn-primary" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+// The "I agree" line shown on both sign-up screens. The two links open the
+// documents without ticking or unticking the box.
+function TermsAgreement({ checked, onChange, onOpenDoc }) {
+  const link = { color: C.black, fontWeight: 700, textDecoration: "underline", cursor: "pointer" };
+  return (
+    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14, cursor: "pointer", textAlign: "left" }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ width: 18, height: 18, marginTop: 1, flexShrink: 0, accentColor: C.black }} />
+      <span style={{ fontSize: 12, color: C.steel, lineHeight: 1.5 }}>
+        I'm 16 or over and I agree to the{" "}
+        <span style={link} onClick={e => { e.preventDefault(); onOpenDoc("terms"); }}>Terms & Conditions</span>
+        {" "}and{" "}
+        <span style={link} onClick={e => { e.preventDefault(); onOpenDoc("privacy"); }}>Privacy Policy</span>.
+      </span>
+    </label>
+  );
+}
+
 function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -2885,8 +3236,8 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
   });
   const initials = user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [recalcDone, setRecalcDone] = useState(false);
   const [recalcResult, setRecalcResult] = useState("");
@@ -3164,8 +3515,8 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
       <div className="section-head"><span className="section-title">Account</span></div>
       <div className="panel" style={{ padding: 0 }}>
         {[
-          { label: "Notifications", action: () => setNotificationsOpen(true) },
-          { label: "Privacy", action: () => setPrivacyOpen(true) },
+          { label: "Privacy Policy", action: () => setPrivacyOpen(true) },
+          { label: "Terms & Conditions", action: () => setTermsOpen(true) },
           { label: "Help & Support", action: () => setHelpOpen(true) },
         ].map(({ label, action }) => (
           <div key={label} onClick={action} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${C.line}`, cursor: "pointer" }}>
@@ -3188,10 +3539,10 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
             </div>
             <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 10 }}>Delete Account</div>
             <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 14 }}>
-              This permanently deletes your profile, handicap history, every submitted scorecard, your bag, and your friends list. It also removes you from other members' friends lists and requests.
+              This permanently deletes your profile, handicap history, every submitted scorecard, your games, goals, bag and username. You'll also be removed from other members' friends lists and requests.
             </p>
             <p style={{ fontSize: 12.5, color: C.ash, lineHeight: 1.6, marginBottom: 20 }}>
-              Discussion topics and comments you've posted publicly will stay visible to other members, since others may have replied to them — only your account and personal data are removed.
+              Anything you've already shared outside the app, such as a leaderboard image sent to a friend, can't be taken back.
             </p>
             <p style={{ fontSize: 11, color: C.red, fontWeight: 700, marginBottom: 18 }}>This cannot be undone.</p>
 
@@ -3230,82 +3581,9 @@ function ProfileScreen({ user, onUpdate, onLogout, onDeleteAccount }) {
 
       {whsInfoOpen && <WHSInfoSheet onClose={() => setWhsInfoOpen(false)} />}
 
-      {/* Notifications Sheet */}
-      {notificationsOpen && (
-        <div className="sheet-overlay" onClick={() => setNotificationsOpen(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
-            <div className="sheet-handle" />
-            <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.cloud, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-              <div style={{ width: 20, height: 20, color: C.black }}><Icon.Bell /></div>
-            </div>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 8 }}>Notifications</div>
-            <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 8 }}>
-              In-app notifications are coming soon — they'll be used for activity in The Lounge when it launches, such as replies to your posts and friend requests.
-            </p>
-            <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.65, marginBottom: 22 }}>
-              For now, your last-round summary and coaching tips appear automatically each time you log in.
-            </p>
-            <button className="btn btn-primary" onClick={() => setNotificationsOpen(false)}>Got it</button>
-          </div>
-        </div>
-      )}
-
-      {/* Privacy Sheet */}
-      {privacyOpen && (
-        <div className="sheet-overlay" onClick={() => setPrivacyOpen(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
-            <div className="sheet-handle" />
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Privacy</div>
-            {[
-              { title: "Your data stays on your device", body: "Your golf rounds, scores, handicap and bag data are stored locally on this device only. Nothing is uploaded to a central server." },
-              { title: "Course search", body: "When you search for a course, your search term is sent to GolfCourseAPI to return results. No personal data is included in these requests." },
-              { title: "Scorecard scanning", body: "When you scan a scorecard, the image is sent securely to Anthropic's API to extract hole data. Images are not stored or used for training." },
-              { title: "No advertising", body: "Bobba Golf does not display ads or share your data with advertisers." },
-              { title: "Delete your account", body: "You can delete your account and all associated data at any time from the Account section." },
-            ].map(({ title, body }) => (
-              <div key={title} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{title}</div>
-                <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>{body}</p>
-              </div>
-            ))}
-            <p style={{ fontSize: 11, color: C.ash, lineHeight: 1.5, marginBottom: 18 }}>
-              A full privacy policy will be published at launch. For questions contact us at Bobbagolf@gmail.com
-            </p>
-            <button className="btn btn-primary" onClick={() => setPrivacyOpen(false)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      {/* Help & Support Sheet */}
-      {helpOpen && (
-        <div className="sheet-overlay" onClick={() => setHelpOpen(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
-            <div className="sheet-handle" />
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 14 }}>Help & Support</div>
-            {[
-              { q: "How is my handicap calculated?", a: "Using the official WHS formula — score differential per round, averaged from your best rounds across your last 20. It updates automatically each time you submit a scorecard." },
-              { q: "What is Stableford / Points?", a: "A scoring system where each hole is worth points based on your score relative to par and your stroke index allocation. Par = 2 points, birdie = 3, bogey = 1, double bogey or worse = 0." },
-              { q: "How do I scan a scorecard?", a: "In Play a Round, tap 'Scan a Scorecard' and photograph your physical card. The AI reads hole numbers, par, stroke index and yardages automatically." },
-              { q: "Why is my Played To blank?", a: "Played To needs the course rating and slope to calculate. These are on your physical scorecard — scanning it will capture them for future rounds." },
-              { q: "How do I add clubs to The Bag?", a: "Go to The Bag module, tap the + button and fill in your club details including summer and winter yardages. Mark as complete when done." },
-              { q: "How do I delete a round?", a: "Open History, tap the red trash icon on any round card to delete it permanently." },
-            ].map(({ q, a }) => (
-              <div key={q} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${C.line}` }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{q}</div>
-                <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>{a}</p>
-              </div>
-            ))}
-            <div style={{ background: C.cloud, padding: "14px 16px", marginBottom: 18 }}>
-              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Found a bug or have a suggestion?</div>
-              <p style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.6, margin: 0 }}>
-                Email us at <span style={{ fontWeight: 700, color: C.black }}>Bobbagolf@gmail.com</span>
-              </p>
-            </div>
-            <div style={{ fontSize: 10, color: C.ash, textAlign: "center", marginBottom: 16 }}>Bobba Golf · Beta v1.0</div>
-            <button className="btn btn-primary" onClick={() => setHelpOpen(false)}>Close</button>
-          </div>
-        </div>
-      )}
+      {privacyOpen && <LegalDocSheet docId="privacy" onClose={() => setPrivacyOpen(false)} />}
+      {termsOpen && <LegalDocSheet docId="terms" onClose={() => setTermsOpen(false)} />}
+      {helpOpen && <HelpSheet onClose={() => setHelpOpen(false)} />}
 
       {cropFile && (
         <PhotoCropModal
