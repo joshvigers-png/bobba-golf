@@ -998,6 +998,7 @@ const Icon = {
   ModLounge:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3.5 8.5A4 4 0 0 1 7.5 4.5h6a4 4 0 0 1 4 4v3a4 4 0 0 1-4 4h-1.2L9 18.5V15.5H7.5a4 4 0 0 1-4-4z"/><path d="M20.5 9.2a3 3 0 0 1 2 2.8v2a3 3 0 0 1-3 3h-.6l-2.4 2.3v-2.3"/></svg>,
   ModTrophy:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7.5 3.5h9v6.2a4.5 4.5 0 0 1-9 0z"/><path d="M7.5 5.3H5a1.6 1.6 0 0 0-1.6 1.6c0 2.2 1.8 4 4 4M16.5 5.3H19a1.6 1.6 0 0 1 1.6 1.6c0 2.2-1.8 4-4 4"/><path d="M12 13.7v3.3M8.7 20.5h6.6l-.9-2.3a1 1 0 0 0-.9-.7h-3l-.9.7z"/></svg>,
   ModPerform:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="0.6" fill="currentColor" stroke="none"/><path d="M12 3.5v2.3M20.5 12h-2.3M12 20.5v-2.3M3.5 12h2.3"/></svg>,
+  ModRange:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="13" r="2.4"/><path d="M5.4 16.2h3.2M7 16.2v4.3"/><path d="M10 10.6C12.2 5.2 16.6 4 21 6" strokeDasharray="1.8 2.2"/><path d="M18.2 4.5 21 6l-1.5 2.7"/></svg>,
   ModApparel:()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 3.3a1.7 1.7 0 1 1 2.4 1.5"/><path d="M12 4.8 4 9.2l1.9 3 2.6-1.3V21h7v-10l2.6 1.3 1.9-3z"/></svg>,
 };
 
@@ -2159,6 +2160,16 @@ export default function App() {
       </>
     );
   }
+  if (modulePage === "range") {
+    return (
+      <>
+        <style>{css}</style>
+        <div className="app-shell">
+          <RangeScreen onBack={() => setModulePage(null)} />
+        </div>
+      </>
+    );
+  }
   if (modulePage === "goals") {
     return (
       <>
@@ -2623,6 +2634,7 @@ function HomeScreen({ user, onOpenModule, onLogout, onReviewRound, onOpenProfile
     { id: "history",     label: "History", sub: "Past scorecards", icon: <Icon.Score />, ready: true },
     { id: "tournaments", label: "Competition Mode", sub: "2-ball, 3-ball, 4-ball games", icon: <Icon.ModTrophy />, ready: true },
     { id: "goals",       label: "Goals & Training", sub: "Reach your targets", icon: <Icon.Target />, ready: true },
+    { id: "range",       label: "On The Range", sub: "Practice routines", icon: <Icon.ModRange />, ready: true },
     { id: "community",   label: "The Lounge", sub: "Friends, chat & looking to play", icon: <Icon.ModLounge />, ready: true },
     { id: "store",       label: "Apparel", sub: "Coming soon", icon: <Icon.ModApparel />, ready: false },
   ];
@@ -9034,6 +9046,464 @@ function buildGoalAdvice(goal, user, stats) {
   // Unrecognised goal type (e.g. from older saved data) — no structured
   // signal to analyse, so return nothing rather than guessing.
   return null;
+}
+
+// ─── On The Range ────────────────────────────────────────────────────────────
+// Off-season practice module: pick what to work on → say how many balls you
+// have → get a full routine (warm-up, set-up checkpoints, drills) with the
+// balls shared out across the drills. The content and ball-sharing logic sit
+// between the RANGE-LOGIC markers so they can be tested on their own.
+// RANGE-LOGIC-START
+const RANGE_MIN_BALLS = 15;
+const RANGE_MAX_BALLS = 300;
+
+const RANGE_WARMUP_OFF_BALL = [
+  "March on the spot or walk briskly for 1 to 2 minutes to get warm.",
+  "Arm circles and shoulder rolls, 10 each way.",
+  "Hold a club across your shoulders and rotate your torso, 10 each side.",
+  "Hold a club across your thighs and hinge forward from the hips with a flat back, 10 times.",
+  "Take three slow practice swings, building to about 70% speed.",
+];
+
+// Order matches how the set-up is usually talked through at the range.
+const RANGE_CHECKPOINTS = [
+  ["ball", "Ball position"],
+  ["grip", "Grip"],
+  ["stance", "Stance"],
+  ["target", "Target"],
+  ["reference", "Reference points"],
+];
+
+// Each block has: weight (share of the balls), min (fewest balls that still
+// make the drill worthwhile) and priority (0 = always kept, higher numbers
+// are dropped first when the bucket is small).
+const RANGE_FOCUSES = [
+  {
+    id: "driver", label: "Driver", sub: "Distance and fairways off the tee",
+    checkpoints: {
+      ball: "Opposite the inside of your lead heel. Tee it so about half the ball sits above the top of the driver face.",
+      grip: "Neutral grip. The V between thumb and forefinger on each hand points between your trail shoulder and chin. Keep the pressure light, about 4 out of 10, because a tight grip slows the clubhead.",
+      stance: "Feet a little wider than your shoulders, toes turned out slightly. Tilt your spine away from the target so your trail shoulder sits lower, with about 55% of your weight on your trail side.",
+      target: "Pick a specific target in the distance, such as a marker or a tree, not just 'down the middle'. Stand behind the ball, choose it, then choose a mark a few feet ahead of the ball on the same line.",
+      reference: "Make railway tracks with two alignment sticks: one along the ball-to-target line and one along your toes, parallel to it. Use a mat line or a tee to mark where your lead heel and the ball sit so you can repeat it.",
+    },
+    blocks: [
+      { id: "d-warm", title: "Warm-up swings", weight: 15, min: 3, priority: 0,
+        how: "Start with a wedge or short iron, then a mid-iron, then the driver. Half swings first, then about 75%. Aim for smooth tempo, not speed.",
+        track: "Move on when your swing feels smooth and balanced." },
+      { id: "d-tempo", title: "Tempo and balance", weight: 25, min: 4, priority: 1,
+        how: "Swing the driver at about 70%. Count 1-2-3 on the way back and 1 on the way down. Hold your finish until the ball lands.",
+        track: "Count the balls where you held a balanced finish. If you can't hold it, you swung too hard." },
+      { id: "d-strike", title: "Strike point", weight: 25, min: 4, priority: 3,
+        how: "Put foot spray or impact tape on the clubface. You want strikes on the centre or just above it. If the marks are low, tee the ball a touch higher. If they are high, tee it a touch lower.",
+        track: "Note where most strikes land on the face." },
+      { id: "d-start", title: "Start line", weight: 15, min: 4, priority: 4,
+        how: "Pick a mark a few feet ahead of the ball on your target line. Try to start every ball over it. Start line first, shape second.",
+        track: "Count how many balls started on your line." },
+      { id: "d-test", title: "Fairway test", weight: 20, min: 5, priority: 2,
+        how: "Use two range markers about 30 yards apart as a fairway. Use your full pre-shot routine on every ball, as if you were on the first tee.",
+        track: "Score the balls that finish inside the fairway, then beat it next session." },
+    ],
+  },
+  {
+    id: "woods", label: "Woods", sub: "Fairway woods and hybrids off the turf",
+    checkpoints: {
+      ball: "Fairway wood: about two ball widths inside your lead heel. Hybrid: a ball width further back, closer to the middle of your stance.",
+      grip: "Same neutral grip as the driver, with light pressure. Check you can see about two knuckles on your lead hand.",
+      stance: "Shoulder width, slightly narrower than for the driver, with weight about even. Hinge from the hips with soft knees so the sole of the club sits flat on the ground.",
+      target: "Choose a distance as well as a direction, such as a marker you want to carry. Add a mark a few feet ahead of the ball on your line.",
+      reference: "Lay a head cover a hand's width behind the ball and swing without touching it. This encourages a shallow, sweeping approach. Use two alignment sticks as railway tracks to check your aim.",
+    },
+    blocks: [
+      { id: "w-warm", title: "Warm-up swings", weight: 15, min: 3, priority: 0,
+        how: "Start with a wedge, move to a mid-iron, then to your fairway wood. Half swings first, then about 75%.",
+        track: "Move on once the contact feels clean." },
+      { id: "w-sweep", title: "Sweep it off the turf", weight: 25, min: 4, priority: 1,
+        how: "Use a fairway wood or hybrid. Brush the turf or mat just after the ball with a shallow swing. Don't try to lift or dig it. Keep your chest over the ball through impact and finish tall.",
+        track: "Look for a light brush mark just after where the ball was." },
+      { id: "w-compare", title: "Wood or hybrid", weight: 25, min: 4, priority: 3,
+        how: "Hit one ball with your fairway wood, then one with your hybrid, and repeat. Pay attention to how far each one carries.",
+        track: "Write down the average carry for each club. These are the numbers to use on the course." },
+      { id: "w-stock", title: "Stock shot", weight: 15, min: 4, priority: 4,
+        how: "Pick one club and one target. Use the same routine on every ball. You are looking for your most reliable ball flight, not your best shot.",
+        track: "Note the shape you hit most often." },
+      { id: "w-test", title: "Par 5 second shot", weight: 20, min: 5, priority: 2,
+        how: "Pick a target about as far as you can carry your wood. Play each ball as a second shot on a par 5, with a full routine.",
+        track: "Score a point for every ball that finishes within 20 yards of your line." },
+    ],
+  },
+  {
+    id: "irons", label: "Irons", sub: "Contact, distance control and consistency",
+    checkpoints: {
+      ball: "7-iron: centre of your stance. Longer irons: a ball width forward of centre. Wedges and short irons: a ball width back of centre. Hands slightly ahead of the ball.",
+      grip: "Neutral grip with light pressure. About two knuckles visible on your lead hand, and your trail palm facing roughly towards the target.",
+      stance: "Shoulder width for mid-irons, a little narrower for short irons. Weight about even at address. Hinge from the hips with soft knees and arms hanging naturally.",
+      target: "Pick a specific target for every shot, then a mark a few feet ahead on your line. Change target every few balls so you don't hit on autopilot.",
+      reference: "Lay an alignment stick along your toes, parallel to the target line. On grass, check the divot starts just after where the ball was. On a mat, check where the club scuffs the mat.",
+    },
+    blocks: [
+      { id: "i-warm", title: "Warm-up swings", weight: 15, min: 3, priority: 0,
+        how: "Begin with half swings with a wedge, then move to an 8-iron. Build to about 75% speed.",
+        track: "Move on when the strikes feel clean and balanced." },
+      { id: "i-ladder", title: "Club ladder", weight: 30, min: 6, priority: 1,
+        how: "Hit three balls each with a short iron, a mid-iron and a long iron, in that order. Then work back down again. Keep the same routine and tempo every time.",
+        track: "Note which club feels best and which feels worst." },
+      { id: "i-contact", title: "Contact check", weight: 20, min: 4, priority: 3,
+        how: "Pick one iron. Think about nothing except ball first, then turf. Check your divot or mat scuff after each ball.",
+        track: "Count the balls with clean, ball-first contact." },
+      { id: "i-random", title: "Random club practice", weight: 15, min: 4, priority: 4,
+        how: "Change club and target on every ball, as you would on the course. No two balls the same.",
+        track: "Count the shots you would be happy with on the course." },
+      { id: "i-test", title: "Target challenge", weight: 20, min: 5, priority: 2,
+        how: "Pick several targets at different distances. Hit one ball at each with the right club, then repeat the targets if you have balls left.",
+        track: "Score a point each time the ball finishes within 10 yards of the target." },
+    ],
+  },
+  {
+    id: "accuracy", label: "Accuracy", sub: "Aim, start line and hitting your target",
+    checkpoints: {
+      ball: "Keep the ball in the same place for the same club every time, for example the centre of your stance for a 7-iron. Consistency matters more than perfection.",
+      grip: "Check your grip every few balls. Small changes twist the clubface and cause misses. Two knuckles on your lead hand, light pressure.",
+      stance: "Balanced and repeatable: shoulder width, soft knees, weight about even. Step into the same spot each time, using a mat line or a tee.",
+      target: "This is the heart of the session. Pick a small target, such as a flag, net or numbered marker, and a mark a few feet ahead on your line. Look at the target, then the mark, then commit and swing.",
+      reference: "Set up railway tracks with two alignment sticks and check them every five balls, because your aim drifts without you noticing. Film one swing from behind with your phone to see where your feet and shoulders point.",
+    },
+    blocks: [
+      { id: "a-warm", title: "Warm-up swings", weight: 15, min: 3, priority: 0,
+        how: "Half swings with a wedge, then an 8-iron. Pick a target even for the warm-up balls.",
+        track: "Move on when the strikes feel clean." },
+      { id: "a-shrink", title: "Shrinking target", weight: 30, min: 6, priority: 1,
+        how: "Use one club, such as a 7-iron. Start with a target 30 yards wide. When you hit it twice in a row, narrow it to 20 yards, then 10.",
+        track: "Note the smallest target you can hit twice in a row." },
+      { id: "a-three", title: "Three targets", weight: 20, min: 4, priority: 3,
+        how: "Pick a left, a centre and a right target. Hit one ball at each in turn. This trains you to control the face and the path, not just one shot.",
+        track: "Count how many balls go where you aimed." },
+      { id: "a-routine", title: "Same routine every ball", weight: 15, min: 4, priority: 4,
+        how: "Stand behind the ball, pick the target, pick the mark ahead, step in, take one look and swing. If you skip a step, don't hit that ball.",
+        track: "Count the balls where you did every step." },
+      { id: "a-test", title: "Five in a row", weight: 20, min: 5, priority: 2,
+        how: "Pick a target and a club. Try to hit five shots in a row inside the target. Reset the count to zero when you miss.",
+        track: "Write down your best streak." },
+    ],
+  },
+  {
+    id: "shortgame", label: "Short Game", sub: "Pitching shots from 20 to 80 yards",
+    checkpoints: {
+      ball: "Middle of your stance, or a touch back for a lower, running shot. Hands slightly ahead of the ball.",
+      grip: "Hold a little lower on the handle and keep the pressure light. A soft grip helps you feel the distance.",
+      stance: "Narrow stance, feet about hip width and slightly open to the target. Keep about 60% of your weight on your lead foot, and keep it there through the swing.",
+      target: "Choose where the ball should land, not just where it should finish. Pick a landing spot and let the ball roll out from there.",
+      reference: "Use a clock face: your backswing goes to 7:30, 9:00 or 10:30 for three different distances. Lay towels at 20, 30 and 40 yards as landing spots.",
+    },
+    blocks: [
+      { id: "s-warm", title: "Rhythm swings", weight: 15, min: 3, priority: 0,
+        how: "Start with small swings with a pitching wedge, brushing the grass or mat. Build up to hip-high backswings.",
+        track: "Move on when the strikes sound and feel the same." },
+      { id: "s-clock", title: "Clock system", weight: 30, min: 6, priority: 1,
+        how: "Use one wedge. Hit three balls with a 7:30 backswing, three at 9:00 and three at 10:30. Keep the same tempo each time.",
+        track: "Write down how far each backswing length carries. That is your own distance chart." },
+      { id: "s-towel", title: "Towel carry", weight: 25, min: 4, priority: 3,
+        how: "Lay a towel about 25 yards away. Try to land every ball on it. Then move it out to 35 and 45 yards.",
+        track: "Count the balls that land on the towel." },
+      { id: "s-flight", title: "Flight control", weight: 15, min: 4, priority: 4,
+        how: "Hit three balls with the ball back in your stance for a low shot that runs. Hit three with it in the centre for a standard shot. Hit three with it slightly forward and the face a little open for a higher, softer shot.",
+        track: "Note how the height and the roll change." },
+      { id: "s-test", title: "Up-and-down test", weight: 20, min: 5, priority: 2,
+        how: "Pick a different distance for each ball. Choose a landing spot and a club, then hit one ball.",
+        track: "Score a point each time the ball finishes within about 5 yards of the distance you chose." },
+    ],
+  },
+  {
+    id: "chipping", label: "Chipping", sub: "Chips and run-ups around the green",
+    checkpoints: {
+      ball: "Back of centre, closer to your trail foot, with your hands ahead of the ball.",
+      grip: "Choke down until your hand is near the steel of the shaft, with light pressure. Keep your lead wrist flat from set-up through the strike.",
+      stance: "Narrow stance, slightly open to the target, with about 70% of your weight on your lead foot. Hands ahead so the shaft leans towards the target.",
+      target: "Pick a landing spot a few feet onto the green rather than aiming at the hole. See the ball land there and roll out.",
+      reference: "Put a coin, towel or head cover on your landing spot. Keep your arms and shoulders moving together as one unit, like a triangle, so the club doesn't flick.",
+    },
+    blocks: [
+      { id: "c-warm", title: "Soft hands warm-up", weight: 15, min: 3, priority: 0,
+        how: "A few brush-the-grass strokes with a wedge or 9-iron, then easy chips to a close target.",
+        track: "Move on when the strikes are clean." },
+      { id: "c-land", title: "Landing spot", weight: 30, min: 5, priority: 1,
+        how: "Pick one club and one landing spot. Hit balls trying to land on it each time. The same landing spot with the same club gives the same roll.",
+        track: "Count the balls that land on the spot." },
+      { id: "c-clubs", title: "One target, three clubs", weight: 25, min: 4, priority: 3,
+        how: "Chip to the same target with a sand wedge, a pitching wedge and a 9-iron. The lower the loft, the more the ball rolls. Learn your own carry-to-roll ratio for each club.",
+        track: "Write down how far each club carries and how far it rolls." },
+      { id: "c-ladder", title: "Distance ladder", weight: 15, min: 4, priority: 4,
+        how: "Chip to targets at about 5, 10 and 15 yards with the same club. Change only the length of your stroke, not the speed.",
+        track: "Count the balls that finish close to each target." },
+      { id: "c-test", title: "Hole-out game", weight: 20, min: 5, priority: 2,
+        how: "Pick a target as your hole. Change the angle and distance for each ball, and play every chip as if it matters.",
+        track: "Score a point each time the ball finishes within a club length of the target." },
+    ],
+  },
+  {
+    id: "overall", label: "Overall Game", sub: "A balanced session through the whole bag",
+    checkpoints: {
+      ball: "Move the ball as the club gets longer: back of centre for wedges, centre for mid-irons, off your lead heel for the driver.",
+      grip: "Check your grip at the start and every time you change club. Neutral hold, light pressure, about two knuckles on your lead hand.",
+      stance: "Match your stance to the club: narrower for wedges, shoulder width for irons, a little wider than your shoulders for the driver. Keep an athletic, balanced posture.",
+      target: "Pick a specific target for every shot, plus a mark a few feet ahead on your line. Treat every ball as a shot on the course.",
+      reference: "Leave an alignment stick on your toe line all session and check it between clubs. Mark your ball position for each club with a tee or a mat line so you can repeat it.",
+    },
+    blocks: [
+      { id: "o-warm", title: "Warm-up swings", weight: 15, min: 3, priority: 0,
+        how: "Start with half swings with a wedge, then a mid-iron. Build up to about 75% speed.",
+        track: "Move on when the strikes feel clean." },
+      { id: "o-bag", title: "Work through the bag", weight: 35, min: 6, priority: 1,
+        how: "Hit a few balls with each group in order: wedge, 8-iron, 6-iron, hybrid or fairway wood, then driver. Use a full routine on every ball.",
+        track: "Note which club group felt worst." },
+      { id: "o-miss", title: "Fix your miss", weight: 15, min: 4, priority: 4,
+        how: "Think back to your last round. Which shot cost you the most? Spend these balls on that shot.",
+        track: "Write down one thing that helped." },
+      { id: "o-sim", title: "On-course simulation", weight: 25, min: 5, priority: 2,
+        how: "Play pretend holes. Hit a driver off the tee, then an approach with the right club for the distance left. Play nine holes if you have the balls.",
+        track: "Count the fairways and greens you would have hit." },
+      { id: "o-short", title: "Short game finish", weight: 15, min: 4, priority: 3,
+        how: "Finish with your wedges. Hit pitch shots to different landing spots. Ending on short game builds touch.",
+        track: "Count the shots that finish close to your target." },
+    ],
+  },
+];
+
+// Shares the bucket out across a focus's blocks by weight. If the bucket is
+// too small for every block to get its minimum, the least essential block
+// (highest priority number) is dropped and the rest are re-shared, until
+// everything that's left is worth doing. Always adds up to exactly `total`.
+function allocateRangeBalls(blocks, total) {
+  let active = blocks.slice();
+  for (;;) {
+    const sumW = active.reduce((s, b) => s + b.weight, 0);
+    const exact = active.map(b => (total * b.weight) / sumW);
+    const alloc = exact.map(Math.floor);
+    const remainder = total - alloc.reduce((s, n) => s + n, 0);
+    exact
+      .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+      .sort((a, b) => b.frac - a.frac)
+      .slice(0, remainder)
+      .forEach(({ i }) => { alloc[i] += 1; });
+    const tooSmall = active.some((b, i) => alloc[i] < b.min);
+    const droppable = active.filter(b => b.priority > 0);
+    if (!tooSmall || droppable.length === 0) {
+      return active.map((b, i) => ({ ...b, balls: alloc[i] }));
+    }
+    const drop = droppable.reduce((worst, b) => (b.priority > worst.priority ? b : worst), droppable[0]);
+    active = active.filter(b => b !== drop);
+  }
+}
+
+// The ordered session for a focus: each block with its ball count and which
+// balls in the bucket it covers (for example "balls 13 to 30").
+function buildRangeSession(focusId, total) {
+  const focus = RANGE_FOCUSES.find(f => f.id === focusId);
+  if (!focus) return [];
+  let cursor = 1;
+  return allocateRangeBalls(focus.blocks, total).map((b, i) => {
+    const from = cursor;
+    const to = cursor + b.balls - 1;
+    cursor = to + 1;
+    return { ...b, from, to, number: i + 1 };
+  });
+}
+
+// Roughly 40 seconds a ball including rests, plus 5 minutes off the ball.
+function rangeMinutes(balls) {
+  return Math.max(15, Math.round((balls * 0.65 + 5) / 5) * 5);
+}
+// RANGE-LOGIC-END
+
+function RangeHead({ eyebrow, title, sub, onBack }) {
+  return (
+    <div className="page-head">
+      <button onClick={onBack} style={{ background: "none", border: "none", color: C.steel, fontSize: 12.5, cursor: "pointer", marginBottom: 14, padding: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 1 }}>
+        <div style={{ width: 14, height: 14, transform: "rotate(180deg)" }}><Icon.ChevronRight /></div> Back
+      </button>
+      <div style={{ position: "relative", zIndex: 1 }}>
+        <div className="page-head-eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        {sub && <p>{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function RangeScreen({ onBack }) {
+  const [step, setStep] = useState("focus"); // focus | balls | routine
+  const [focusId, setFocusId] = useState(null);
+  const [ballsInput, setBallsInput] = useState("50");
+  const [ballsError, setBallsError] = useState("");
+  const [doneBlocks, setDoneBlocks] = useState({});
+
+  const focus = RANGE_FOCUSES.find(f => f.id === focusId);
+  const ballsNum = parseInt(ballsInput, 10);
+  const ballsValid = Number.isFinite(ballsNum) && ballsNum >= RANGE_MIN_BALLS && ballsNum <= RANGE_MAX_BALLS;
+
+  // The routine is long, so each new step should start at the top.
+  useEffect(() => { window.scrollTo(0, 0); }, [step]);
+
+  const goBack = () => {
+    if (step === "routine") setStep("balls");
+    else if (step === "balls") setStep("focus");
+    else onBack();
+  };
+
+  const pickFocus = (id) => {
+    setFocusId(id);
+    setBallsError("");
+    setDoneBlocks({});
+    setStep("balls");
+  };
+
+  const buildRoutine = () => {
+    if (!ballsValid) {
+      setBallsError(`Enter a number between ${RANGE_MIN_BALLS} and ${RANGE_MAX_BALLS}.`);
+      return;
+    }
+    setDoneBlocks({});
+    setStep("routine");
+  };
+
+  // ── Step 1: what do you want to work on? ──
+  if (step === "focus" || !focus) {
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <RangeHead eyebrow="On The Range" title="What do you want to work on?" sub="Pick one and you'll get a full routine for your session." onBack={goBack} />
+        {RANGE_FOCUSES.map(f => (
+          <button
+            key={f.id}
+            onClick={() => pickFocus(f.id)}
+            style={{ display: "flex", alignItems: "center", gap: 12, width: "calc(100% - 36px)", margin: "0 18px 8px", padding: "14px 16px", textAlign: "left", font: "inherit", color: C.black, background: C.white, border: `1.5px solid ${C.line}`, cursor: "pointer" }}
+          >
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 14 }}>{f.label}</div>
+              <div style={{ fontSize: 11.5, color: C.steel, marginTop: 2 }}>{f.sub}</div>
+            </div>
+            <div style={{ width: 15, height: 15, color: C.fog, flexShrink: 0 }}><Icon.ChevronRight /></div>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // ── Step 2: how many balls? ──
+  if (step === "balls") {
+    return (
+      <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+        <RangeHead eyebrow={focus.label} title="How many balls are you hitting?" sub="The routine is shared out across exactly this many balls." onBack={goBack} />
+        <div style={{ padding: "0 18px" }}>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label className="field-label">Balls in your bucket</label>
+            <input
+              className="input"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={ballsInput}
+              onChange={e => { setBallsInput(e.target.value.replace(/[^0-9]/g, "").slice(0, 3)); setBallsError(""); }}
+              onKeyDown={e => { if (e.key === "Enter") buildRoutine(); }}
+              style={{ fontSize: 28, fontWeight: 800, textAlign: "center" }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[30, 50, 75, 100].map(n => (
+              <button
+                key={n}
+                onClick={() => { setBallsInput(String(n)); setBallsError(""); }}
+                style={{ flex: 1, padding: "10px 0", fontWeight: 800, fontSize: 13, cursor: "pointer", border: `1.5px solid ${ballsNum === n ? C.black : C.line}`, background: ballsNum === n ? C.black : C.white, color: ballsNum === n ? C.white : C.black }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: C.steel, marginBottom: 18, lineHeight: 1.5 }}>
+            {ballsValid
+              ? `About ${rangeMinutes(ballsNum)} minutes, including a 5 minute warm-up before the first ball.`
+              : `Anything from ${RANGE_MIN_BALLS} to ${RANGE_MAX_BALLS} balls works.`}
+          </p>
+          {ballsError && <p style={{ fontSize: 12.5, color: C.red, marginBottom: 12 }}>{ballsError}</p>}
+          <button className="btn btn-primary" onClick={buildRoutine}>Build my routine</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 3: the routine ──
+  const session = buildRangeSession(focusId, ballsNum);
+  const doneCount = session.filter(b => doneBlocks[b.id]).length;
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", paddingBottom: 40 }}>
+      <RangeHead eyebrow="On The Range" title={`${focus.label} session`} sub={`${ballsNum} balls, about ${rangeMinutes(ballsNum)} minutes`} onBack={goBack} />
+
+      <div className="section-head"><span className="section-title">Before you hit a ball</span></div>
+      <div className="panel">
+        {RANGE_WARMUP_OFF_BALL.map((line, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, padding: "5px 0", fontSize: 13, lineHeight: 1.5 }}>
+            <span style={{ color: C.ash, flexShrink: 0 }}>•</span>
+            <span>{line}</span>
+          </div>
+        ))}
+        <p style={{ fontSize: 11, color: C.steel, marginTop: 8 }}>Stop and rest if anything hurts.</p>
+      </div>
+
+      <div className="section-head"><span className="section-title">Set-up checkpoints</span></div>
+      <div className="panel">
+        {RANGE_CHECKPOINTS.map(([key, label], i) => (
+          <div key={key} style={{ padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${C.line}` }}>
+            <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 3 }}>{label}</div>
+            <div style={{ fontSize: 12.5, color: C.steel, lineHeight: 1.55 }}>{focus.checkpoints[key]}</div>
+          </div>
+        ))}
+        <p style={{ fontSize: 11, color: C.ash, marginTop: 10, lineHeight: 1.5 }}>
+          Lead is the side closest to the target (left for right-handed golfers). Trail is the other side.
+        </p>
+      </div>
+
+      <div className="section-head"><span className="section-title">Your session</span></div>
+      <p style={{ margin: "0 18px 12px", fontSize: 12, color: C.steel }}>
+        Tap a block when you've finished it. {doneCount} of {session.length} done.
+      </p>
+      {session.map(b => {
+        const done = !!doneBlocks[b.id];
+        const toggle = () => setDoneBlocks(d => ({ ...d, [b.id]: !d[b.id] }));
+        return (
+          <div
+            key={b.id}
+            role="button"
+            tabIndex={0}
+            aria-pressed={done}
+            onClick={toggle}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+            style={{ margin: "0 18px 10px", padding: "14px 16px", background: done ? C.cloud : C.white, border: `1.5px solid ${done ? C.line : C.black}`, cursor: "pointer" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+              <div style={{ width: 28, height: 28, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: done ? "#1B7A3D" : C.black, color: C.white, fontWeight: 800, fontSize: 13 }}>
+                {done ? <div style={{ width: 14, height: 14 }}><Icon.Check /></div> : b.number}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: done ? C.steel : C.black, textDecoration: done ? "line-through" : "none" }}>{b.title}</div>
+                <div style={{ fontSize: 11.5, color: C.steel, marginTop: 1 }}>
+                  {b.from === b.to ? `Ball ${b.from}` : `Balls ${b.from} to ${b.to}`}, {b.balls} {b.balls === 1 ? "ball" : "balls"}
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.55, color: done ? C.steel : C.black }}>{b.how}</div>
+            <div style={{ fontSize: 11.5, lineHeight: 1.5, color: C.steel, marginTop: 8 }}>
+              <strong style={{ color: done ? C.steel : C.black }}>Track:</strong> {b.track}
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ padding: "8px 18px 0" }}>
+        <p style={{ fontSize: 12, color: C.steel, marginBottom: 12 }}>Session total: {ballsNum} balls.</p>
+        <button className="btn btn-primary" onClick={onBack} style={{ marginBottom: 10 }}>Finish session</button>
+        <button className="btn btn-outline" onClick={() => setStep("focus")}>Choose a different focus</button>
+      </div>
+    </div>
+  );
 }
 
 function GoalsScreen({ user, onBack, onUpdateUser }) {
